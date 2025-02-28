@@ -400,6 +400,8 @@ class LDA_In_EM:
             error = np.sum(np.square(self.topic_θ - θ)) + np.sum(np.square(self.word_Φ - Φ))
             if idx % 100 == 0:
                 print(f"学習回数：{idx}")
+                print(f"誤差：{error}")
+                print()
             
             # 終了条件
             if error < self.tol:
@@ -510,6 +512,8 @@ class LDA_In_VB:
             error = np.sum(np.square(self.topic_θ_αk - θ_new)) + np.sum(np.square(self.word_Φ_βv - Φ_new))
             if idx % 100 == 0:
                 print(f"学習回数：{idx}")
+                print(f"誤差：{error}")
+                print()
             
             # 終了条件
             if error < self.tol:
