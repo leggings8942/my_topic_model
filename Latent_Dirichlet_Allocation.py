@@ -478,36 +478,36 @@ class LDA_In_VB:
         else:
             self.random = np.random.default_rng()
         
-        self.vocab_num = vocab_count
-        self.doc_w_num = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)])
-        self.topic_θ   = np.array([self.random.random((self.topic_num,)) for _ in range(0, self.doc_num)])
-        self.topic_θ   = self.topic_θ / np.sum(self.topic_θ, axis=1).reshape(self.doc_num,   1)
-        self.word_Φ    = np.array([self.random.random((self.vocab_num,)) for _ in range(0, self.topic_num)])
-        self.word_Φ    = self.word_Φ  / np.sum(self.word_Φ,  axis=1).reshape(self.topic_num, 1)
+        self.vocab_num  = vocab_count
+        self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)])
+        self.topic_θ_αk = np.array([self.random.random((self.topic_num,)) for _ in range(0, self.doc_num)])
+        self.word_Φ_βv  = np.array([self.random.random((self.vocab_num,)) for _ in range(0, self.topic_num)])
+        self.topic_θ_α  = 1
+        self.word_Φ_β   = 1
     
     def fit(self) -> bool:
         # 学習開始
         for idx in range(0, self.max_iterate):
-            θ_new = np.zeros_like(self.topic_θ)
-            Φ_new = np.zeros_like(self.word_Φ)
+            θ_new = np.zeros_like(self.topic_θ_αk) + self.topic_θ_α
+            Φ_new = np.zeros_like(self.word_Φ_βv)  + self.word_Φ_β
+            # θ_new = np.abs(θ_new)
+            # Φ_new = np.abs(Φ_new)
             for idx_doc in range(0, self.doc_num):
                 for idx_doc_w in range(0, self.doc_w_num[idx_doc]):
                     # 負担率の計算
-                    q_dn = self.topic_θ[idx_doc, :] * self.word_Φ[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]
-                    q_dn = q_dn / np.sum(q_dn)
+                    avg_qθ = digamma(self.topic_θ_αk[idx_doc]) - digamma(np.sum(self.topic_θ_αk[idx_doc]))
+                    avg_qΦ = digamma(self.word_Φ_βv[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) - digamma(np.sum(self.word_Φ_βv, axis=1))
+                    q_dn   = np.exp(avg_qθ + avg_qΦ)
+                    q_dn   = q_dn / np.sum(q_dn)
                     
-                    # トピック分布の計算
+                    # トピック分布のハイパーパラメータの計算
                     θ_new[idx_doc, :] = θ_new[idx_doc, :] + q_dn
                 
-                    # 単語分布の計算
+                    # 単語分布のハイパーパラメータの計算
                     Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] = Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + q_dn
             
-            # 各分布の正規化
-            θ = θ_new / np.sum(θ_new, axis=1).reshape(self.doc_num, 1)
-            Φ = Φ_new / np.sum(Φ_new, axis=1).reshape(self.topic_num, 1)
-            
             # デバッグ出力
-            error = np.sum(np.square(self.topic_θ - θ)) + np.sum(np.square(self.word_Φ - Φ))
+            error = np.sum(np.square(self.topic_θ_αk - θ_new)) + np.sum(np.square(self.word_Φ_βv - Φ_new))
             if idx % 100 == 0:
                 print(f"学習回数：{idx}")
             
@@ -516,23 +516,23 @@ class LDA_In_VB:
                 break
             
             # 各分布の更新
-            self.topic_θ = θ
-            self.word_Φ  = Φ
+            self.topic_θ_αk = θ_new
+            self.word_Φ_βv  = Φ_new
         
         # 各分布の更新
-        self.topic_θ = θ
-        self.word_Φ  = Φ
+        self.topic_θ_αk = θ_new
+        self.word_Φ_βv  = Φ_new
 
         return True
     
     def stats_info(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         I2W       = {val: key for key, val in self.W2I.items()}
         doc_idx   = [f"文書{i + 1}"           for i in range(0, self.doc_num)]
-        topic_idx = [f"トピック{i + 1}"        for i in range(0, self.topic_num)]
-        word_idx  = [f"単語{i + 1}:{I2W[i]}"  for i in range(0, self.vocab_num)]
+        topic_idx = [f"トピック分布θ_α{i + 1}"     for i in range(0, self.topic_num)]
+        word_idx  = [f"単語分布Φ_β{i + 1}:{I2W[i]}"  for i in range(0, self.vocab_num)]
         
         # トピック数とは違い、単語数は事前に把握することができないため四捨五入を行わない
-        pd_θ = pd.DataFrame(data=np.round(self.topic_θ, 4), index=doc_idx,   columns=topic_idx)
-        pd_Φ = pd.DataFrame(data=self.word_Φ,               index=topic_idx, columns=word_idx)
+        pd_θ = pd.DataFrame(data=np.round(self.topic_θ_αk, 4), index=doc_idx,   columns=topic_idx)
+        pd_Φ = pd.DataFrame(data=self.word_Φ_βv,               index=topic_idx, columns=word_idx)
         
         return pd_θ, pd_Φ
