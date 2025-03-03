@@ -484,8 +484,8 @@ class LDA_In_VB:
         self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)])
         self.topic_θ_αk = np.array([self.random.random((self.topic_num,)) for _ in range(0, self.doc_num)])
         self.word_Φ_βv  = np.array([self.random.random((self.vocab_num,)) for _ in range(0, self.topic_num)])
-        self.topic_θ_α  = 1
-        self.word_Φ_β   = 1
+        self.topic_θ_α  = 0.001
+        self.word_Φ_β   = 0.001
     
     def fit(self) -> bool:
         # 学習開始
