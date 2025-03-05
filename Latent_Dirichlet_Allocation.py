@@ -1,8 +1,13 @@
+import re
 import pandas as pd
 import numpy as np
 import MeCab
 from scipy.special import gamma, digamma
 
+
+def remove_url(text:str) -> str:
+    t = re.sub(r"(https?|ftp)(:\/\/[-_\.!~*\'()a-zA-Z0-9;\/?:\@&=\+\$,%#]+)", "", text)
+    return t
 
 class Mixture_Of_Unigram_Models_In_EM:
     def __init__(self, train_data, tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
@@ -327,7 +332,6 @@ class LDA_In_EM:
             print("エラー：：Pandas DataFrameである必要があります。")
             raise
         
-        self.train_data  = train_data
         self.doc_num     = len(train_data)
         self.tol         = tol
         self.topic_num   = topic_num
@@ -338,8 +342,11 @@ class LDA_In_EM:
         wakati      = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
         self.W2I    = {}
         self.DI2W   = [{} for _ in range(0, self.doc_num)]
+        DEL_IDX     = []
         for idx in range(0, self.doc_num):
             doc  = train_data.iat[idx, 0]
+            doc  = remove_url(doc)
+            
             node = wakati.parseToNode(doc)
             doc_w_count = 0
             while node:
@@ -361,6 +368,16 @@ class LDA_In_EM:
                     pass
                 
                 node = node.next
+            
+            # 空の文書を登録
+            if doc_w_count == 0:
+                DEL_IDX.append(idx)
+        
+        # 空の文書を削除
+        self.train_data  = train_data.drop(train_data.index[DEL_IDX]).reset_index(drop=True)
+        self.doc_num     = len(self.train_data)
+        self.DI2W        = [elem for elem in self.DI2W  if elem != {}]
+        word_count       = [elem for elem in word_count if elem != {}]
         
         self.random_state = random_state
         if random_state != None:
@@ -369,7 +386,7 @@ class LDA_In_EM:
             self.random = np.random.default_rng()
         
         self.vocab_num = vocab_count
-        self.doc_w_num = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)])
+        self.doc_w_num = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)], dtype=int)
         self.topic_θ   = np.array([self.random.random((self.topic_num,)) for _ in range(0, self.doc_num)])
         self.topic_θ   = self.topic_θ / np.sum(self.topic_θ, axis=1).reshape(self.doc_num,   1)
         self.word_Φ    = np.array([self.random.random((self.vocab_num,)) for _ in range(0, self.topic_num)])
@@ -450,8 +467,11 @@ class LDA_In_VB:
         wakati      = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
         self.W2I    = {}
         self.DI2W   = [{} for _ in range(0, self.doc_num)]
+        DEL_IDX     = []
         for idx in range(0, self.doc_num):
             doc  = train_data.iat[idx, 0]
+            doc  = remove_url(doc)
+            
             node = wakati.parseToNode(doc)
             doc_w_count = 0
             while node:
@@ -473,6 +493,16 @@ class LDA_In_VB:
                     pass
                 
                 node = node.next
+            
+            # 空の文書を登録
+            if doc_w_count == 0:
+                DEL_IDX.append(idx)
+        
+        # 空の文書を削除
+        self.train_data  = train_data.drop(train_data.index[DEL_IDX]).reset_index(drop=True)
+        self.doc_num     = len(self.train_data)
+        self.DI2W        = [elem for elem in self.DI2W  if elem != {}]
+        word_count       = [elem for elem in word_count if elem != {}]
         
         self.random_state = random_state
         if random_state != None:
@@ -481,7 +511,7 @@ class LDA_In_VB:
             self.random = np.random.default_rng()
         
         self.vocab_num  = vocab_count
-        self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)])
+        self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)], dtype=int)
         self.topic_θ_αk = np.array([self.random.random((self.topic_num,)) for _ in range(0, self.doc_num)])
         self.word_Φ_βv  = np.array([self.random.random((self.vocab_num,)) for _ in range(0, self.topic_num)])
         self.topic_θ_α  = 0.001
@@ -492,8 +522,6 @@ class LDA_In_VB:
         for idx in range(0, self.max_iterate):
             θ_new = np.zeros_like(self.topic_θ_αk) + self.topic_θ_α
             Φ_new = np.zeros_like(self.word_Φ_βv)  + self.word_Φ_β
-            # θ_new = np.abs(θ_new)
-            # Φ_new = np.abs(Φ_new)
             for idx_doc in range(0, self.doc_num):
                 for idx_doc_w in range(0, self.doc_w_num[idx_doc]):
                     # 負担率の計算
@@ -535,8 +563,143 @@ class LDA_In_VB:
         topic_idx = [f"トピック分布θ_α{i + 1}"     for i in range(0, self.topic_num)]
         word_idx  = [f"単語分布Φ_β{i + 1}:{I2W[i]}"  for i in range(0, self.vocab_num)]
         
+        # 点推定への変換
+        topic_θ = (self.topic_θ_αk + self.topic_θ_α) / np.sum(self.topic_θ_αk + self.topic_θ_α, axis=1).reshape(self.doc_num,   1)
+        word_Φ  = (self.word_Φ_βv  + self.word_Φ_β)  / np.sum(self.word_Φ_βv  + self.word_Φ_β,  axis=1).reshape(self.topic_num, 1)
+        
         # トピック数とは違い、単語数は事前に把握することができないため四捨五入を行わない
-        pd_θ = pd.DataFrame(data=np.round(self.topic_θ_αk, 4), index=doc_idx,   columns=topic_idx)
-        pd_Φ = pd.DataFrame(data=self.word_Φ_βv,               index=topic_idx, columns=word_idx)
+        pd_θ = pd.DataFrame(data=np.round(topic_θ, 4), index=doc_idx,   columns=topic_idx)
+        pd_Φ = pd.DataFrame(data=word_Φ,               index=topic_idx, columns=word_idx)
+        
+        return pd_θ, pd_Φ
+
+class LDA_In_CGS: # Collapsed Gibbs Sampling
+    def __init__(self, train_data:pd.DataFrame, tol:float=1e-6, topic_num:int=10, max_iterate:int=1000, random_state=None) -> None:
+        if type(train_data) is list:
+            train_data = pd.DataFrame(data=train_data, columns=['text'])
+        
+        if type(train_data) is not pd.DataFrame:
+            print(f"type(train_data) = {type(train_data)}")
+            print("エラー：：Pandas DataFrameである必要があります。")
+            raise
+        
+        self.train_data  = train_data
+        self.doc_num     = len(train_data)
+        self.tol         = tol
+        self.topic_num   = topic_num
+        self.max_iterate = max_iterate
+        
+        vocab_count = 0
+        word_count  = [{} for _ in range(0, self.doc_num)]
+        wakati      = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
+        self.W2I    = {}
+        self.DI2W   = [{} for _ in range(0, self.doc_num)]
+        DEL_IDX     = []
+        for idx in range(0, self.doc_num):
+            doc  = train_data.iat[idx, 0]
+            doc  = remove_url(doc)
+            
+            node = wakati.parseToNode(doc)
+            doc_w_count = 0
+            while node:
+                word   = node.surface
+                hinshi = node.feature.split(',')[0]
+                if (word not in self.W2I) and (hinshi == '名詞'):
+                    self.W2I[word]  = vocab_count
+                    vocab_count    += 1
+                
+                if (word in word_count[idx]) and (hinshi == '名詞'):
+                    self.DI2W[idx][doc_w_count] = word
+                    word_count[idx][word] += 1
+                    doc_w_count += 1
+                elif hinshi == '名詞':
+                    self.DI2W[idx][doc_w_count] = word
+                    word_count[idx][word]  = 1
+                    doc_w_count += 1
+                else:
+                    pass
+                
+                node = node.next
+        
+            # 空の文書を登録
+            if doc_w_count == 0:
+                DEL_IDX.append(idx)
+        
+        # 空の文書を削除
+        self.train_data  = train_data.drop(train_data.index[DEL_IDX]).reset_index(drop=True)
+        self.doc_num     = len(self.train_data)
+        self.DI2W        = [elem for elem in self.DI2W  if elem != {}]
+        word_count       = [elem for elem in word_count if elem != {}]
+        
+        self.random_state = random_state
+        if random_state != None:
+            self.random = np.random.default_rng(seed=self.random_state)
+        else:
+            self.random = np.random.default_rng()
+        
+        self.vocab_num  = vocab_count
+        self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)], dtype=int)
+        self.N_dk       = np.zeros([self.doc_num, self.topic_num])
+        self.N_kv       = np.zeros([self.topic_num, self.vocab_num])
+        self.topic_θ_α  = 0.001
+        self.word_Φ_β   = 0.001
+    
+    def fit(self) -> bool:
+        # 学習開始
+        Z_dn = np.zeros([self.doc_num, self.doc_w_num.max()], dtype=int) - 1
+        for idx in range(0, self.max_iterate):
+            for idx_doc in range(0, self.doc_num):
+                for idx_w_num in range(0, self.doc_w_num[idx_doc]):
+                    # 各総量値からサンプリング対象を除外
+                    if Z_dn[idx_doc, idx_w_num] != -1:
+                        self.N_dk[idx_doc, Z_dn[idx_doc, idx_w_num]] -= 1
+                        self.N_kv[Z_dn[idx_doc, idx_w_num], self.W2I[self.DI2W[idx_doc][idx_w_num]]] -= 1
+                    
+                    # サンプリング確率の計算
+                    sampling_prob = (self.N_dk[idx_doc, :] + self.topic_θ_α) * (self.N_kv[:, self.W2I[self.DI2W[idx_doc][idx_w_num]]] + self.word_Φ_β) / (np.sum(self.N_kv, axis=1) + self.vocab_num * self.word_Φ_β)
+                    sampling_prob = sampling_prob / np.sum(sampling_prob)
+                    
+                    # 各単語のトピックのサンプリング
+                    rnd_c = self.random.multinomial(n=1, pvals=sampling_prob, size=1)
+                    Z_dn[idx_doc, idx_w_num] = np.where(rnd_c == 1)[1]
+                    
+                    # 各総量値の更新
+                    self.N_dk[idx_doc, Z_dn[idx_doc, idx_w_num]] += 1
+                    self.N_kv[Z_dn[idx_doc, idx_w_num], self.W2I[self.DI2W[idx_doc][idx_w_num]]] += 1
+            
+            # トピックのディリクレ分布のハイパーパラメータの更新
+            topic_ratio    = (np.sum(digamma(self.N_dk + self.topic_θ_α)) - self.doc_num * self.topic_num * digamma(self.topic_θ_α)) / (self.topic_num * np.sum(digamma(np.sum(self.N_dk, axis=1) + self.topic_num * self.topic_θ_α)) - self.doc_num * self.topic_num * digamma(self.topic_num * self.topic_θ_α))
+            self.topic_θ_α = self.topic_θ_α * topic_ratio
+            
+            # 単語のディリクレ分布のハイパーパラメータの更新
+            word_ratio    = (np.sum(digamma(self.N_kv + self.word_Φ_β)) - self.topic_num * self.vocab_num * digamma(self.word_Φ_β)) / (self.vocab_num * np.sum(digamma(np.sum(self.N_kv, axis=1) + self.vocab_num * self.word_Φ_β)) - self.topic_num * self.vocab_num * digamma(self.vocab_num * self.word_Φ_β))
+            self.word_Φ_β = self.word_Φ_β * word_ratio
+            
+            # デバッグ出力
+            error = np.sum(np.abs(topic_ratio - 1)) + np.sum(np.abs(word_ratio - 1))
+            if idx % 100 == 0:
+                print(f"学習回数：{idx}")
+                print(f"誤差：{error}")
+                print()
+            
+            # 終了条件
+            if error < self.tol:
+                break
+
+        return True
+    
+    def stats_info(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        I2W       = {val: key for key, val in self.W2I.items()}
+        doc_idx   = [f"文書{i + 1}"                 for i in range(0, self.doc_num)]
+        topic_idx = [f"トピック分布θ_α{i + 1}"        for i in range(0, self.topic_num)]
+        word_idx  = [f"単語分布Φ_β{i + 1}:{I2W[i]}"  for i in range(0, self.vocab_num)]
+        
+        # 点推定への変換
+        topic_θ = (self.N_dk + self.topic_θ_α) / np.sum(self.N_dk + self.topic_θ_α, axis=1).reshape(self.doc_num, 1)
+        word_Φ  = (self.N_kv + self.word_Φ_β)  / np.sum(self.N_kv + self.word_Φ_β,  axis=1).reshape(self.topic_num, 1)
+        
+        # トピック数とは違い、単語数は事前に把握することができないため四捨五入を行わない
+        pd_θ = pd.DataFrame(data=np.round(topic_θ, 4), index=doc_idx,   columns=topic_idx)
+        pd_Φ = pd.DataFrame(data=word_Φ,               index=topic_idx, columns=word_idx)
         
         return pd_θ, pd_Φ
