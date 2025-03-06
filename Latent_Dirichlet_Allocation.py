@@ -30,6 +30,31 @@ def normalization_string(pd_text:pd.DataFrame, colname:str) -> pd.DataFrame:
     
     return pd_text
 
+def create_stop_word(pd_text:pd.DataFrame, colname:str, threshold:int=10) -> frozenset[str]:
+    wakati     = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
+    word_count = {}
+    for idx in pd_text.index:
+        text = pd_text.at[idx, colname]
+        if type(text) is not str:
+            print(f"type(text) = {type(text)}")
+            print("エラー：：文字列型である必要があります。")
+            raise
+        
+        node = wakati.parseToNode(text)
+        while node:
+            word = node.surface
+            
+            if word in word_count:
+                word_count[word] += 1
+            else:
+                word_count[word]  = 1
+            
+            node = node.next
+        
+    stop_word = frozenset([key for key, val in word_count.items() if val >= threshold])
+    return stop_word
+        
+
 class Mixture_Of_Unigram_Models_In_EM:
     def __init__(self, train_data, tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
         if type(train_data) is pd.core.frame.DataFrame:
@@ -344,7 +369,7 @@ class Mixture_Of_Unigram_Models_In_CGS:
         return True
 
 class LDA_In_EM:
-    def __init__(self, train_data:pd.DataFrame, tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
+    def __init__(self, train_data:pd.DataFrame, stop_word:frozenset[str], tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
         
@@ -357,6 +382,7 @@ class LDA_In_EM:
         self.tol         = tol
         self.topic_num   = topic_num
         self.max_iterate = max_iterate
+        self.target_POS  = ['名詞', '動詞', '形容詞', '形容動詞', '感動詞', '助動詞']
         
         vocab_count = 0
         word_count  = [{} for _ in range(0, self.doc_num)]
@@ -371,11 +397,17 @@ class LDA_In_EM:
             while node:
                 word   = node.surface
                 hinshi = node.feature.split(',')[0]
-                if (word not in self.W2I) and (hinshi == '名詞'):
+                
+                # ストップワードの除去
+                if word in stop_word:
+                    node = node.next
+                    continue
+                
+                if (word not in self.W2I) and (hinshi in self.target_POS):
                     self.W2I[word]  = vocab_count
                     vocab_count    += 1
                 
-                if (word in word_count[idx]) and (hinshi == '名詞'):
+                if (word in word_count[idx]) and (hinshi in self.target_POS):
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word] += 1
                     doc_w_count += 1
@@ -466,7 +498,7 @@ class LDA_In_EM:
         return pd_θ, pd_Φ
 
 class LDA_In_VB:
-    def __init__(self, train_data:pd.DataFrame, tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
+    def __init__(self, train_data:pd.DataFrame, stop_word:frozenset[str], tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
         
@@ -480,6 +512,7 @@ class LDA_In_VB:
         self.tol         = tol
         self.topic_num   = topic_num
         self.max_iterate = max_iterate
+        self.target_POS  = ['名詞', '動詞', '形容詞', '形容動詞', '感動詞', '助動詞']
         
         vocab_count = 0
         word_count  = [{} for _ in range(0, self.doc_num)]
@@ -494,11 +527,17 @@ class LDA_In_VB:
             while node:
                 word   = node.surface
                 hinshi = node.feature.split(',')[0]
-                if (word not in self.W2I) and (hinshi == '名詞'):
+                
+                # ストップワードの除去
+                if word in stop_word:
+                    node = node.next
+                    continue
+                
+                if (word not in self.W2I) and (hinshi in self.target_POS):
                     self.W2I[word]  = vocab_count
                     vocab_count    += 1
                 
-                if (word in word_count[idx]) and (hinshi == '名詞'):
+                if (word in word_count[idx]) and (hinshi in self.target_POS):
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word] += 1
                     doc_w_count += 1
@@ -591,7 +630,7 @@ class LDA_In_VB:
         return pd_θ, pd_Φ
 
 class LDA_In_CGS: # Collapsed Gibbs Sampling
-    def __init__(self, train_data:pd.DataFrame, tol:float=1e-6, topic_num:int=10, max_iterate:int=1000, random_state=None) -> None:
+    def __init__(self, train_data:pd.DataFrame, stop_word:frozenset[str], tol:float=1e-6, topic_num:int=10, max_iterate:int=1000, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
         
@@ -605,6 +644,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
         self.tol         = tol
         self.topic_num   = topic_num
         self.max_iterate = max_iterate
+        self.target_POS  = ['名詞', '動詞', '形容詞', '形容動詞', '感動詞', '助動詞']
         
         vocab_count = 0
         word_count  = [{} for _ in range(0, self.doc_num)]
@@ -619,11 +659,17 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
             while node:
                 word   = node.surface
                 hinshi = node.feature.split(',')[0]
-                if (word not in self.W2I) and (hinshi == '名詞'):
+                
+                # ストップワードの除去
+                if word in stop_word:
+                    node = node.next
+                    continue
+                
+                if (word not in self.W2I) and (hinshi in self.target_POS):
                     self.W2I[word]  = vocab_count
                     vocab_count    += 1
                 
-                if (word in word_count[idx]) and (hinshi == '名詞'):
+                if (word in word_count[idx]) and (hinshi in self.target_POS):
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word] += 1
                     doc_w_count += 1
