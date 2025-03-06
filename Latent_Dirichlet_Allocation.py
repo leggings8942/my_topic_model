@@ -1,4 +1,7 @@
 import re
+import unicodedata
+import demoji
+import neologdn
 import pandas as pd
 import numpy as np
 import MeCab
@@ -6,8 +9,26 @@ from scipy.special import gamma, digamma
 
 
 def remove_url(text:str) -> str:
-    t = re.sub(r"(https?|ftp)(:\/\/[-_\.!~*\'()a-zA-Z0-9;\/?:\@&=\+\$,%#]+)", "", text)
+    t = re.sub(r"(https?|ftp)(:\/\/[-_\.!~*\'()a-zA-Z0-9;\/?:\@&=\+\$,%#]+)", " ", text)
     return t
+
+def normalization_string(pd_text:pd.DataFrame, colname:str) -> pd.DataFrame:
+    for idx in pd_text.index:
+        text = pd_text.at[idx, colname]
+        if type(text) is not str:
+            print(f"type(text) = {type(text)}")
+            print("エラー：：文字列型である必要があります。")
+            raise
+        
+        text = unicodedata.normalize("NFKC", text) # UNICODE正規化
+        text = neologdn.normalize(text)            # NEOLOGD正規化
+        text = remove_url(text)                    # URL削除
+        text = demoji.replace(text, ' ')           # 絵文字削除
+        text = text.lower()                        # 小文字化
+        
+        pd_text.at[idx, colname] = text
+    
+    return pd_text
 
 class Mixture_Of_Unigram_Models_In_EM:
     def __init__(self, train_data, tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
@@ -345,8 +366,6 @@ class LDA_In_EM:
         DEL_IDX     = []
         for idx in range(0, self.doc_num):
             doc  = train_data.iat[idx, 0]
-            doc  = remove_url(doc)
-            
             node = wakati.parseToNode(doc)
             doc_w_count = 0
             while node:
@@ -470,8 +489,6 @@ class LDA_In_VB:
         DEL_IDX     = []
         for idx in range(0, self.doc_num):
             doc  = train_data.iat[idx, 0]
-            doc  = remove_url(doc)
-            
             node = wakati.parseToNode(doc)
             doc_w_count = 0
             while node:
@@ -597,8 +614,6 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
         DEL_IDX     = []
         for idx in range(0, self.doc_num):
             doc  = train_data.iat[idx, 0]
-            doc  = remove_url(doc)
-            
             node = wakati.parseToNode(doc)
             doc_w_count = 0
             while node:
