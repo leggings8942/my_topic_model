@@ -570,8 +570,8 @@ class LDA_In_VB:
         self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)], dtype=int)
         self.topic_θ_αk = np.array([self.random.random((self.topic_num,)) for _ in range(0, self.doc_num)])
         self.word_Φ_βv  = np.array([self.random.random((self.vocab_num,)) for _ in range(0, self.topic_num)])
-        self.topic_θ_α  = 0.001
-        self.word_Φ_β   = 0.001
+        self.topic_θ_α  = 1 / self.vocab_num
+        self.word_Φ_β   = 1 / self.vocab_num
     
     def fit(self) -> bool:
         # 学習開始
@@ -615,9 +615,9 @@ class LDA_In_VB:
     
     def stats_info(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         I2W       = {val: key for key, val in self.W2I.items()}
-        doc_idx   = [f"文書{i + 1}"           for i in range(0, self.doc_num)]
-        topic_idx = [f"トピック分布θ_α{i + 1}"     for i in range(0, self.topic_num)]
-        word_idx  = [f"単語分布Φ_β{i + 1}:{I2W[i]}"  for i in range(0, self.vocab_num)]
+        doc_idx   = [f"文書{i + 1}"          for i in range(0, self.doc_num)]
+        topic_idx = [f"トピック{i + 1}"       for i in range(0, self.topic_num)]
+        word_idx  = [f"単語{i + 1}:{I2W[i]}" for i in range(0, self.vocab_num)]
         
         # 点推定への変換
         topic_θ = (self.topic_θ_αk + self.topic_θ_α) / np.sum(self.topic_θ_αk + self.topic_θ_α, axis=1).reshape(self.doc_num,   1)
@@ -630,7 +630,7 @@ class LDA_In_VB:
         return pd_θ, pd_Φ
 
 class LDA_In_CGS: # Collapsed Gibbs Sampling
-    def __init__(self, train_data:pd.DataFrame, stop_word:frozenset[str], tol:float=1e-6, topic_num:int=10, max_iterate:int=1000, random_state=None) -> None:
+    def __init__(self, train_data:pd.DataFrame, stop_word:frozenset[str], tol:float=1e-6, topic_num:int=10, max_iterate:int=500, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
         
@@ -702,8 +702,8 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
         self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)], dtype=int)
         self.N_dk       = np.zeros([self.doc_num, self.topic_num])
         self.N_kv       = np.zeros([self.topic_num, self.vocab_num])
-        self.topic_θ_α  = 0.001
-        self.word_Φ_β   = 0.001
+        self.topic_θ_α  = np.array([1 / self.vocab_num for _ in range(0, self.topic_num)])
+        self.word_Φ_β   = 1 / self.vocab_num
     
     def fit(self) -> bool:
         # 学習開始
@@ -729,7 +729,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
                     self.N_kv[Z_dn[idx_doc, idx_w_num], self.W2I[self.DI2W[idx_doc][idx_w_num]]] += 1
             
             # トピックのディリクレ分布のハイパーパラメータの更新
-            topic_ratio    = (np.sum(digamma(self.N_dk + self.topic_θ_α)) - self.doc_num * self.topic_num * digamma(self.topic_θ_α)) / (self.topic_num * np.sum(digamma(np.sum(self.N_dk, axis=1) + self.topic_num * self.topic_θ_α)) - self.doc_num * self.topic_num * digamma(self.topic_num * self.topic_θ_α))
+            topic_ratio    = (np.sum(digamma(self.N_dk + self.topic_θ_α), axis=0) - self.doc_num * digamma(self.topic_θ_α)) / (np.sum(digamma(np.sum(self.N_dk + self.topic_θ_α, axis=1))) - self.doc_num * digamma(np.sum(self.topic_θ_α)))
             self.topic_θ_α = self.topic_θ_α * topic_ratio
             
             # 単語のディリクレ分布のハイパーパラメータの更新
@@ -751,9 +751,9 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
     
     def stats_info(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         I2W       = {val: key for key, val in self.W2I.items()}
-        doc_idx   = [f"文書{i + 1}"                 for i in range(0, self.doc_num)]
-        topic_idx = [f"トピック分布θ_α{i + 1}"        for i in range(0, self.topic_num)]
-        word_idx  = [f"単語分布Φ_β{i + 1}:{I2W[i]}"  for i in range(0, self.vocab_num)]
+        doc_idx   = [f"文書{i + 1}"          for i in range(0, self.doc_num)]
+        topic_idx = [f"トピック{i + 1}"       for i in range(0, self.topic_num)]
+        word_idx  = [f"単語{i + 1}:{I2W[i]}" for i in range(0, self.vocab_num)]
         
         # 点推定への変換
         topic_θ = (self.N_dk + self.topic_θ_α) / np.sum(self.N_dk + self.topic_θ_α, axis=1).reshape(self.doc_num, 1)
