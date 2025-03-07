@@ -4,8 +4,9 @@ import emoji
 import neologdn
 import pandas as pd
 import numpy as np
-import MeCab
 from scipy.special import gamma, digamma
+from sudachipy import tokenizer
+from sudachipy import dictionary
 
 
 def remove_url(text:str) -> str:
@@ -32,7 +33,9 @@ def normalization_string(pd_text:pd.DataFrame, colname:str) -> pd.DataFrame:
     return pd_text
 
 def create_stop_word(pd_text:pd.DataFrame, colname:str, stop_word:list[str], threshold:int=10) -> frozenset[str]:
-    wakati     = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
+    tokenizer_obj = dictionary.Dictionary(dict_type='full').create()
+    tokenize_mode = tokenizer.Tokenizer.SplitMode.C
+    
     word_count = {}
     for idx in pd_text.index:
         text = pd_text.at[idx, colname]
@@ -41,16 +44,14 @@ def create_stop_word(pd_text:pd.DataFrame, colname:str, stop_word:list[str], thr
             print("エラー：：文字列型である必要があります。")
             raise
         
-        node = wakati.parseToNode(text)
-        while node:
-            word = node.surface
+        tokens = tokenizer_obj.tokenize(text, tokenize_mode)
+        for node in tokens:
+            word = node.surface()
             
             if word in word_count:
                 word_count[word] += 1
             else:
                 word_count[word]  = 1
-            
-            node = node.next
     
     custom_list = stop_word + [key for key, val in word_count.items() if val < threshold]
     stop_word   = frozenset(custom_list)
@@ -384,25 +385,26 @@ class LDA_In_EM:
         self.tol         = tol
         self.topic_num   = topic_num
         self.max_iterate = max_iterate
-        self.target_POS  = ['名詞', '動詞', '形容詞', '形容動詞', '感動詞', '助動詞']
+        self.target_POS  = ['名詞', '動詞', '形容詞', '感動詞', '助動詞', '形状詞']
+        
+        tokenizer_obj = dictionary.Dictionary(dict_type='full').create()
+        tokenize_mode = tokenizer.Tokenizer.SplitMode.C
         
         vocab_count = 0
         word_count  = [{} for _ in range(0, self.doc_num)]
-        wakati      = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
         self.W2I    = {}
         self.DI2W   = [{} for _ in range(0, self.doc_num)]
         DEL_IDX     = []
         for idx in range(0, self.doc_num):
-            doc  = train_data.iat[idx, 0]
-            node = wakati.parseToNode(doc)
+            doc    = train_data.iat[idx, 0]
+            tokens = tokenizer_obj.tokenize(doc, tokenize_mode)
             doc_w_count = 0
-            while node:
-                word   = node.surface
-                hinshi = node.feature.split(',')[0]
+            for node in tokens:
+                word   = node.surface()
+                hinshi = node.part_of_speech()[0]
                 
                 # ストップワードの除去
                 if word in stop_word:
-                    node = node.next
                     continue
                 
                 if (word not in self.W2I) and (hinshi in self.target_POS):
@@ -413,14 +415,10 @@ class LDA_In_EM:
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word] += 1
                     doc_w_count += 1
-                elif hinshi == '名詞':
+                elif hinshi in self.target_POS:
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word]  = 1
                     doc_w_count += 1
-                else:
-                    pass
-                
-                node = node.next
             
             # 空の文書を登録
             if doc_w_count == 0:
@@ -514,25 +512,26 @@ class LDA_In_VB:
         self.tol         = tol
         self.topic_num   = topic_num
         self.max_iterate = max_iterate
-        self.target_POS  = ['名詞', '動詞', '形容詞', '形容動詞', '感動詞', '助動詞']
+        self.target_POS  = ['名詞', '動詞', '形容詞', '感動詞', '助動詞', '形状詞']
+        
+        tokenizer_obj = dictionary.Dictionary(dict_type='full').create()
+        tokenize_mode = tokenizer.Tokenizer.SplitMode.C
         
         vocab_count = 0
         word_count  = [{} for _ in range(0, self.doc_num)]
-        wakati      = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
         self.W2I    = {}
         self.DI2W   = [{} for _ in range(0, self.doc_num)]
         DEL_IDX     = []
         for idx in range(0, self.doc_num):
-            doc  = train_data.iat[idx, 0]
-            node = wakati.parseToNode(doc)
+            doc    = train_data.iat[idx, 0]
+            tokens = tokenizer_obj.tokenize(doc, tokenize_mode)
             doc_w_count = 0
-            while node:
-                word   = node.surface
-                hinshi = node.feature.split(',')[0]
+            for node in tokens:
+                word   = node.surface()
+                hinshi = node.part_of_speech()[0]
                 
                 # ストップワードの除去
                 if word in stop_word:
-                    node = node.next
                     continue
                 
                 if (word not in self.W2I) and (hinshi in self.target_POS):
@@ -543,14 +542,10 @@ class LDA_In_VB:
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word] += 1
                     doc_w_count += 1
-                elif hinshi == '名詞':
+                elif hinshi in self.target_POS:
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word]  = 1
                     doc_w_count += 1
-                else:
-                    pass
-                
-                node = node.next
             
             # 空の文書を登録
             if doc_w_count == 0:
@@ -646,25 +641,26 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
         self.tol         = tol
         self.topic_num   = topic_num
         self.max_iterate = max_iterate
-        self.target_POS  = ['名詞', '動詞', '形容詞', '形容動詞', '感動詞', '助動詞']
+        self.target_POS  = ['名詞', '動詞', '形容詞', '感動詞', '助動詞', '形状詞']
+        
+        tokenizer_obj = dictionary.Dictionary(dict_type='full').create()
+        tokenize_mode = tokenizer.Tokenizer.SplitMode.C
         
         vocab_count = 0
         word_count  = [{} for _ in range(0, self.doc_num)]
-        wakati      = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
         self.W2I    = {}
         self.DI2W   = [{} for _ in range(0, self.doc_num)]
         DEL_IDX     = []
         for idx in range(0, self.doc_num):
-            doc  = train_data.iat[idx, 0]
-            node = wakati.parseToNode(doc)
+            doc    = train_data.iat[idx, 0]
+            tokens = tokenizer_obj.tokenize(doc, tokenize_mode)
             doc_w_count = 0
-            while node:
-                word   = node.surface
-                hinshi = node.feature.split(',')[0]
+            for node in tokens:
+                word   = node.surface()
+                hinshi = node.part_of_speech()[0]
                 
                 # ストップワードの除去
                 if word in stop_word:
-                    node = node.next
                     continue
                 
                 if (word not in self.W2I) and (hinshi in self.target_POS):
@@ -675,14 +671,10 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word] += 1
                     doc_w_count += 1
-                elif hinshi == '名詞':
+                elif hinshi in self.target_POS:
                     self.DI2W[idx][doc_w_count] = word
                     word_count[idx][word]  = 1
                     doc_w_count += 1
-                else:
-                    pass
-                
-                node = node.next
         
             # 空の文書を登録
             if doc_w_count == 0:
