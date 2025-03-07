@@ -1,6 +1,7 @@
 # user defined
 .DS_Store
 csv_data
+json_data
 parquet_data
 
 # Byte-compiled / optimized / DLL files

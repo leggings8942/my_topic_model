@@ -1,6 +1,6 @@
 import re
 import unicodedata
-import demoji
+import emoji
 import neologdn
 import pandas as pd
 import numpy as np
@@ -23,14 +23,15 @@ def normalization_string(pd_text:pd.DataFrame, colname:str) -> pd.DataFrame:
         text = unicodedata.normalize("NFKC", text) # UNICODE正規化
         text = neologdn.normalize(text)            # NEOLOGD正規化
         text = remove_url(text)                    # URL削除
-        text = demoji.replace(text, ' ')           # 絵文字削除
+        # text = demoji.replace(text, ' ')           # 絵文字削除
+        text = emoji.demojize(text)                # 絵文字をテキストに変換
         text = text.lower()                        # 小文字化
         
         pd_text.at[idx, colname] = text
     
     return pd_text
 
-def create_stop_word(pd_text:pd.DataFrame, colname:str, threshold:int=10) -> frozenset[str]:
+def create_stop_word(pd_text:pd.DataFrame, colname:str, stop_word:list[str], threshold:int=10) -> frozenset[str]:
     wakati     = MeCab.Tagger("-Owakati -d /opt/homebrew/lib/mecab/dic/mecab-ipadic-neologd")
     word_count = {}
     for idx in pd_text.index:
@@ -50,8 +51,9 @@ def create_stop_word(pd_text:pd.DataFrame, colname:str, threshold:int=10) -> fro
                 word_count[word]  = 1
             
             node = node.next
-        
-    stop_word = frozenset([key for key, val in word_count.items() if val >= threshold])
+    
+    custom_list = stop_word + [key for key, val in word_count.items() if val < threshold]
+    stop_word   = frozenset(custom_list)
     return stop_word
         
 
