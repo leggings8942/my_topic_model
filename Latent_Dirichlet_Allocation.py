@@ -758,3 +758,133 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
         pd_Φ = pd.DataFrame(data=word_Φ,               index=topic_idx, columns=word_idx)
         
         return pd_θ, pd_Φ
+
+
+class X_POST_In_VB:
+    def __init__(self, train_data:pd.DataFrame, stop_word:frozenset[str], tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
+        if type(train_data) is list:
+            train_data = pd.DataFrame(data=train_data, columns=['text'])
+        
+        if type(train_data) is not pd.DataFrame:
+            print(f"type(train_data) = {type(train_data)}")
+            print("エラー：：Pandas DataFrameである必要があります。")
+            raise
+        
+        self.train_data  = train_data
+        self.doc_num     = len(train_data)
+        self.tol         = tol
+        self.topic_num   = topic_num
+        self.max_iterate = max_iterate
+        self.target_POS  = ['名詞', '動詞', '形容詞', '感動詞', '助動詞', '形状詞']
+        
+        tokenizer_obj = dictionary.Dictionary(dict_type='full').create()
+        tokenize_mode = tokenizer.Tokenizer.SplitMode.C
+        
+        vocab_count = 0
+        word_count  = [{} for _ in range(0, self.doc_num)]
+        self.W2I    = {}
+        self.DI2W   = [{} for _ in range(0, self.doc_num)]
+        DEL_IDX     = []
+        for idx in range(0, self.doc_num):
+            doc    = train_data.iat[idx, 0]
+            tokens = tokenizer_obj.tokenize(doc, tokenize_mode)
+            doc_w_count = 0
+            for node in tokens:
+                word   = node.surface()
+                hinshi = node.part_of_speech()[0]
+                
+                # ストップワードの除去
+                if word in stop_word:
+                    continue
+                
+                if (word not in self.W2I) and (hinshi in self.target_POS):
+                    self.W2I[word]  = vocab_count
+                    vocab_count    += 1
+                
+                if (word in word_count[idx]) and (hinshi in self.target_POS):
+                    self.DI2W[idx][doc_w_count] = word
+                    word_count[idx][word] += 1
+                    doc_w_count += 1
+                elif hinshi in self.target_POS:
+                    self.DI2W[idx][doc_w_count] = word
+                    word_count[idx][word]  = 1
+                    doc_w_count += 1
+            
+            # 空の文書を登録
+            if doc_w_count == 0:
+                DEL_IDX.append(idx)
+        
+        # 空の文書を削除
+        self.train_data  = train_data.drop(train_data.index[DEL_IDX]).reset_index(drop=True)
+        self.doc_num     = len(self.train_data)
+        self.DI2W        = [elem for elem in self.DI2W  if elem != {}]
+        word_count       = [elem for elem in word_count if elem != {}]
+        
+        self.random_state = random_state
+        if random_state != None:
+            self.random = np.random.default_rng(seed=self.random_state)
+        else:
+            self.random = np.random.default_rng()
+        
+        self.vocab_num  = vocab_count
+        self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)], dtype=int)
+        self.topic_θ_αk = np.array([self.random.random((self.topic_num,)) for _ in range(0, self.doc_num)])
+        self.word_Φ_βv  = np.array([self.random.random((self.vocab_num,)) for _ in range(0, self.topic_num)])
+        self.topic_θ_α  = 1 / self.vocab_num
+        self.word_Φ_β   = 1 / self.vocab_num
+    
+    def fit(self) -> bool:
+        # 学習開始
+        for idx in range(0, self.max_iterate):
+            θ_new = np.zeros_like(self.topic_θ_αk) + self.topic_θ_α
+            Φ_new = np.zeros_like(self.word_Φ_βv)  + self.word_Φ_β
+            for idx_doc in range(0, self.doc_num):
+                for idx_doc_w in range(0, self.doc_w_num[idx_doc]):
+                    # 負担率の計算
+                    avg_qθ = digamma(self.topic_θ_αk[idx_doc]) - digamma(np.sum(self.topic_θ_αk[idx_doc]))
+                    avg_qΦ = digamma(self.word_Φ_βv[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) - digamma(np.sum(self.word_Φ_βv, axis=1))
+                    q_dn   = np.exp(avg_qθ + avg_qΦ)
+                    q_dn   = q_dn / np.sum(q_dn)
+                    
+                    # トピック分布のハイパーパラメータの計算
+                    θ_new[idx_doc, :] = θ_new[idx_doc, :] + q_dn
+                
+                    # 単語分布のハイパーパラメータの計算
+                    Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] = Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + q_dn
+            
+            # デバッグ出力
+            error = np.sum(np.square(self.topic_θ_αk - θ_new)) + np.sum(np.square(self.word_Φ_βv - Φ_new))
+            if idx % 100 == 0:
+                print(f"学習回数：{idx}")
+                print(f"誤差：{error}")
+                print()
+            
+            # 終了条件
+            if error < self.tol:
+                break
+            
+            # 各分布の更新
+            self.topic_θ_αk = θ_new
+            self.word_Φ_βv  = Φ_new
+        
+        # 各分布の更新
+        self.topic_θ_αk = θ_new
+        self.word_Φ_βv  = Φ_new
+
+        return True
+    
+    def stats_info(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        I2W       = {val: key for key, val in self.W2I.items()}
+        doc_idx   = [f"文書{i + 1}"          for i in range(0, self.doc_num)]
+        topic_idx = [f"トピック{i + 1}"       for i in range(0, self.topic_num)]
+        word_idx  = [f"単語{i + 1}:{I2W[i]}" for i in range(0, self.vocab_num)]
+        
+        # 点推定への変換
+        topic_θ = (self.topic_θ_αk + self.topic_θ_α) / np.sum(self.topic_θ_αk + self.topic_θ_α, axis=1).reshape(self.doc_num,   1)
+        word_Φ  = (self.word_Φ_βv  + self.word_Φ_β)  / np.sum(self.word_Φ_βv  + self.word_Φ_β,  axis=1).reshape(self.topic_num, 1)
+        
+        # トピック数とは違い、単語数は事前に把握することができないため四捨五入を行わない
+        pd_θ = pd.DataFrame(data=np.round(topic_θ, 4), index=doc_idx,   columns=topic_idx)
+        pd_Φ = pd.DataFrame(data=word_Φ,               index=topic_idx, columns=word_idx)
+        
+        return pd_θ, pd_Φ
