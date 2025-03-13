@@ -760,7 +760,128 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
         return pd_θ, pd_Φ
 
 
-class X_POST_In_VB:
+# X(旧:Twitter) のポスト(旧:ツイート)から感情分析を行うモデルを構築する
+# 解析する感情ラベルは具体的に「喜び, 悲しみ, 期待, 驚き, 怒り, 恐れ, 嫌悪, 信頼」の8つのラベルを想定している
+# このモデルはノイズあり対応トピックモデルの亜種である
+
+# 生成過程は下記の通り
+# 1. ハイパーパラメータの設定
+#   (a) α:Float64 定数
+#   (b) β:Float64 定数
+#   (c) γ:Float64 定数
+#   (d) η:[Float64, Float64] 定数
+#   (e) ν:array[Float64] 所与の定数
+#   (f) C:array[Float64] 所与の定数
+# 2. 一般単語分布 φ_0 〜 Dirichlet(β)
+# 3. 関係性分布 λ 〜 Beta(η)
+# 4. For 感情トピック k = 1, ... K
+#       (a) 感情分布 ψ_k 〜 Dirichlet(γ)
+# 5. For 単語トピック l = 1, ... 8
+#       (a) 単語分布 φ_l 〜 Dirichlet(β)
+# 6. For 文書 d = 1, ... D
+#       (a) 感情トピック分布 θ_d 〜 Dirichlet(α)
+#       (b) For 感情サンプル m = 1, ... M_d
+#               i.  感情トピック y_dm 〜 Categorical(θ_d)
+#               ii. 感情分布 x_dm 〜 Dirichlet(ψ_(y_dm))
+#       (c) 文書感情尤度 h_d 〜 Nagino(ν, Σ_k θ_dk ψ_k, C)
+#       (d) 文書感情分布 x_d = x_d1 + x_d2 + ... + x_d(M_d)
+#       (e) For 各単語 n = 1, ... N_d
+#               i.   単語トピック z_dn 〜 Categorical(x_d)
+#               ii.  関係性 r_dn 〜 Bernoulli(λ)
+#               iii. 単語 w_dn 〜 Categorical(φ_(z_dn)) if r_dn == 1 else Categorical(φ_0)
+
+# この感情分析モデルを構築するにあたり、新しい確立分布を定義した
+# Σ_i p_i = 1
+# C_i : 非負の実数
+# x_i ∈ [0, C_i]
+# Nagino(x | p, C) = Π_i (p_i / C_i^(p_i)) x_i^(p_i - 1)
+# この確立分布はベータ分布の多変量への拡張である。そのような確立分布としてはディリクレ分布があげられる。
+# ディリクレ分布と似ている部分も多く見られるが、制約条件的な部分で違いがある
+# この確立分布の期待値と分散を以下に示す
+# E(x_i) = (p_i / (1 + p_i)) C_i
+# V(x_i) = (p_i / ((1 + p_i)^2 (2 + p_i))) C_i^2
+
+# 感情分析用のトピックモデルの先行研究例として以下のようなトピックモデルが存在する
+# ・SLDA(Supervised Latent Dirichlet Allocation)
+#       LDAモデルの拡張
+#       特徴的な処理として、各文書ごとのトピック割り当て分布を算出する
+#       トピック割り当て分布を説明変数にして特定の感情ラベル(目的変数)に線形回帰する
+# ・JST(Joint Sentiment Topic)
+#       LDAモデルの拡張
+#       特徴的な処理として、一つの文書に対して以下の仮定を行う
+#           ・各単語は単一の感情ラベルを持つ
+#           ・各単語は単一のトピックラベルを持つ
+#           ・各トピックラベルは単一の感情ラベルと関連する
+#           ・各感情ラベルは他の感情ラベルと重複しないように同数のトピックラベルを持つ
+
+# これらの先行研究モデルにはそれぞれ以下のような弱点が存在する
+# ・SLDA
+#   結合トピックモデルと同じ弱点を持ちうる
+#   すなわち、感情ラベルと単語分布の間に関連性がない
+#   LDAが切り分けるトピックの基準によっては、感情ラベルと相反する単語が関連づけられる可能性がある
+# ・JST
+#   必要メモリ量が多い
+#   各トピックが単一の感情しか表現できない
+
+# これらの先行研究に比較して実装モデルは以下の特徴を持つ
+# ・対応トピックモデルの亜種であるため、感情ラベルと単語分布の間に関連性がある
+# ・ノイズありモデルの亜種であるため、感情ラベルと直接関係ない単語分布を推定できる
+# ・JSTモデルと比較して、一つの文書に対して以下の仮定を行う
+#       ・各単語は単一の感情分布を持つ
+#       ・各単語は単一のトピックラベルを持つ
+#       ・各トピックラベルは複数の感情ラベルと関連する
+#       ・各感情ラベルは複数のトピックラベルと関連する
+#       ・各トピックラベルは他のトピックラベルと感情ラベルが重複することを許す
+#       ・各感情ラベルは他の感情ラベルとトピックラベルが重複することを許す
+# ・必要メモリ量がJSTモデルと比較して少ない
+
+# モデル構築にあたって独立性の仮定を以下のように定義する
+# q(R, Z, H, X, Y, θ, Φ, Ψ, Λ) = q(R, X, θ)q(H, Y, Z, Λ)q(Ψ, Φ)
+# x_d ≒ x_dm : 総感情サンプル分布と各感情サンプル分布がほぼ等しいと仮定する
+
+# ベイズ自由エネルギー最適化を以下の数式を最小化することによって行う
+# Ω = {R, X, θ}
+# Ξ = {H, Y, Z, Λ}
+# χ = {Ψ, Φ}
+# F = ∫∫∫∫∫ Σ_R Σ_Z Σ_X Σ_Y q(R, Z, H, X, Y, θ, Φ, Ψ, Λ) log(p(W, R, Z, H, X, Y, θ, Φ, Ψ, Λ) / q(R, Z, H, X, Y, θ, Φ, Ψ, Λ)) dHdθdΦdΨdΛ
+#   = ∫∫∫ q(Ω)q(Ξ)q(χ) log(p(W, Ω, Ξ, χ) / q(Ω)q(Ξ)q(χ)) dΩdΞdχ
+#   = ∫∫∫ q(Ω)q(Ξ)q(χ) {logp(W, Ω, Ξ, χ) - logq(Ω) - logq(Ξ) - logq(χ)} dΩdΞdχ
+
+# 参考：
+# 平均値の算出式が離散な分布：Bernoulli、Categorical、Multiple
+# 平均値の算出式が連続な分布：Beta、Dirichlet
+
+# p(W, R, Z, Y, Ω, Ξ)
+# = p(W, R, Z, H, X, Y, θ, Φ, Ψ, Λ)
+# = p(W | Z, R, Φ) p(Z | X) p(R | Λ) p(Λ | η) p(H | θ, Ψ, ν) p(X | Y, Ψ) p(Y | θ) p(θ | α) p(Ψ | γ) p(Φ | β)
+
+# logq(Ω) ∝ E_q(Ξ)q(χ)[logp(W, Ω, Ξ, χ)]
+# logq(Ξ) ∝ E_q(Ω)q(χ)[logp(W, Ω, Ξ, χ)]
+# logq(χ) ∝ E_q(Ω)q(Ξ)[logp(W, Ω, Ξ, χ)]
+
+# logq(Ω) ∝ E_q(Ξ)q(χ)[logp(W | Z, R, Φ) p(R | Λ)] + E_q(Ξ)q(χ)[logp(Z | X) p(X | Y, Ψ)] + E_q(Ξ)q(χ)[logp(H | θ, Ψ, ν) p(Y | θ) p(θ | α)]
+#         = E_q(Z, Λ)q(Φ)[logp(W | Z, R, Φ) p(R | Λ)] + E_q(Y, Z)q(Ψ)[logp(Z | X) p(X | Y, Ψ)] + E_q(H, Y)q(Ψ)[logp(H | θ, Ψ, ν) p(Y | θ) p(θ | α)]
+#         = logq(R) + logq(X) + logq(θ)
+# logq(Ξ) ∝ E_q(Ω)q(χ)[logp(H | θ, Ψ, ν)] + E_q(Ω)q(χ)[logp(X | Y, Ψ) p(Y | θ)] + E_q(Ω)q(χ)[logp(W | Z, R, Φ) p(Z | X)] + E_q(Ω)q(χ)[logp(R | Λ) p(Λ | η)]
+#         = E_q(θ)q(Ψ)[logp(H | θ, Ψ, ν)] + E_q(X, θ)q(Ψ)[logp(X | Y, Ψ) p(Y | θ)] + E_q(R, X)q(Φ)[logp(W | Z, R, Φ) p(Z | X)] + E_q(R)[logp(R | Λ) p(Λ | η)]
+#         = logq(H) + logq(Y) + logq(Z) + logq(Λ)
+# logq(χ) ∝ E_q(Ω)q(Ξ)[logp(H | θ, Ψ, ν) p(X | Y, Ψ) p(Ψ | γ)] + E_q(Ω)q(Ξ)[logp(W | Z, R, Φ) p(Φ | β)]
+#         = E_q(X, θ)q(H, Y)[logp(H | θ, Ψ, ν) p(X | Y, Ψ) p(Ψ | γ)] + E_q(R)q(Z)[logp(W | Z, R, Φ) p(Φ | β)]
+#         = logq(Ψ) + logq(Φ)
+
+# q(Λ) ∝ Beta((Σ_d Σ_n q_dn) + η[0], (D N_d - (Σ_d Σ_n q_dn)) + η[1])  q_dn 〜 q(R)
+# q(Φ) ∝ Dirichlet_0((Σ_d Σ_n:(v=W_dn) (1 - q_dn)) + β)  q_dn 〜 q(R)
+    #    Dirichlet_l((Σ_d Σ_n:(v=W_dn) q_dn q_dnl) + β)  q_dn 〜 q(R)  q_dnl 〜 q(Z)
+# q(X) ∝ Dirichlet(X_d | Σ_n q_dnl + Σ_m Σ_k q_dmk {q_kl / Σ_l q_kl - 1} + 1)  q_dnl 〜 q(Z)  q_dmk 〜 q(Y)  q_kl 〜 q(Ψ)
+# q(θ) ∝ 
+
+# q(Ψ) ∝ Π_d Dirichlet(X_d | 1 + Σ_m Σ_k q_dmk q_dl {ψ_kl - 1})  Π_k Dirichlet(ψ_k | γ)
+# q(θ) ∝ exp(Σ_l ∫ q_dl q_kl log(Σ_k θ_dk ψ_kl)_l^ν_l dHdΨ) Dirichlet(1 + Σ_m q_dmk (I(y_dm = k) + α - 1))  q_dl 〜 q(H)  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
+# q(X) ∝ exp(Σ_m Σ_k q_dmk logx_dl ∫ q(ψ_k) (ψ_k - 1) dψ_k) Dirichlet(1 + Σ_n q_dnl)  q_dmk 〜 q(Y)  q(ψ_k) 〜 q(Ψ)  q_dnl 〜 q(Z)
+# q(Ψ) ∝ Π_d Dirichlet(X_d | 1 + Σ_m Σ_k q_dmk q_dl {ψ_kl - 1})  Π_k Dirichlet(ψ_k | γ)
+
+
+class Harmonized_Sentiment_Topic_Model_In_VB:
     def __init__(self, train_data:pd.DataFrame, stop_word:frozenset[str], tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
