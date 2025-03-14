@@ -783,7 +783,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 #       (b) For 感情サンプル m = 1, ... M_d
 #               i.  感情トピック y_dm 〜 Categorical(θ_d)
 #               ii. 感情分布 x_dm 〜 Dirichlet(ψ_(y_dm))
-#       (c) 文書感情尤度 h_d 〜 Nagino(ν, Σ_k θ_dk ψ_k, C)
+#       (c) 文書感情尤度 ν_d 〜 Nagino(Σ_k θ_dk ψ_k, C)
 #       (d) 文書感情分布 x_d = x_d1 + x_d2 + ... + x_d(M_d)
 #       (e) For 各単語 n = 1, ... N_d
 #               i.   単語トピック z_dn 〜 Categorical(x_d)
@@ -841,44 +841,76 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 
 # ベイズ自由エネルギー最適化を以下の数式を最小化することによって行う
 # Ω = {R, X, θ}
-# Ξ = {H, Y, Z, Λ}
+# Ξ = {Y, Z, Λ}
 # χ = {Ψ, Φ}
-# F = ∫∫∫∫∫ Σ_R Σ_Z Σ_X Σ_Y q(R, Z, H, X, Y, θ, Φ, Ψ, Λ) log(p(W, R, Z, H, X, Y, θ, Φ, Ψ, Λ) / q(R, Z, H, X, Y, θ, Φ, Ψ, Λ)) dHdθdΦdΨdΛ
-#   = ∫∫∫ q(Ω)q(Ξ)q(χ) log(p(W, Ω, Ξ, χ) / q(Ω)q(Ξ)q(χ)) dΩdΞdχ
-#   = ∫∫∫ q(Ω)q(Ξ)q(χ) {logp(W, Ω, Ξ, χ) - logq(Ω) - logq(Ξ) - logq(χ)} dΩdΞdχ
+# F = ∫∫∫∫ Σ_R Σ_Z Σ_Y q(R, Z, X, Y, θ, Φ, Ψ, Λ) log(p(W, ν, R, Z, X, Y, θ, Φ, Ψ, Λ) / q(R, Z, X, Y, θ, Φ, Ψ, Λ)) dXdθdΦdΨdΛ
+#   = ∫∫∫ q(Ω)q(Ξ)q(χ) log(p(W, ν, Ω, Ξ, χ) / q(Ω)q(Ξ)q(χ)) dΩdΞdχ
+#   = ∫∫∫ q(Ω)q(Ξ)q(χ) {logp(W, ν, Ω, Ξ, χ) - logq(Ω) - logq(Ξ) - logq(χ)} dΩdΞdχ
 
 # 参考：
-# 平均値の算出式が離散な分布：Bernoulli、Categorical、Multiple
-# 平均値の算出式が連続な分布：Beta、Dirichlet
+# 平均値の算出式が離散な分布：Bernoulli、Categorical
+# 平均値の算出式が連続な分布：Beta、Dirichlet,Nagino
 
-# p(W, R, Z, Y, Ω, Ξ)
-# = p(W, R, Z, H, X, Y, θ, Φ, Ψ, Λ)
-# = p(W | Z, R, Φ) p(Z | X) p(R | Λ) p(Λ | η) p(H | θ, Ψ, ν) p(X | Y, Ψ) p(Y | θ) p(θ | α) p(Ψ | γ) p(Φ | β)
+# p(W, ν, Ω, Ξ, χ)
+# = p(W, ν, R, Z, X, Y, θ, Φ, Ψ, Λ)
+# = p(W | Z, R, Φ) p(Z | X) p(R | Λ) p(Λ | η) p(ν | θ, Ψ) p(X | Y, Ψ) p(Y | θ) p(θ | α) p(Ψ | γ) p(Φ | β)
 
 # logq(Ω) ∝ E_q(Ξ)q(χ)[logp(W, Ω, Ξ, χ)]
 # logq(Ξ) ∝ E_q(Ω)q(χ)[logp(W, Ω, Ξ, χ)]
 # logq(χ) ∝ E_q(Ω)q(Ξ)[logp(W, Ω, Ξ, χ)]
 
-# logq(Ω) ∝ E_q(Ξ)q(χ)[logp(W | Z, R, Φ) p(R | Λ)] + E_q(Ξ)q(χ)[logp(Z | X) p(X | Y, Ψ)] + E_q(Ξ)q(χ)[logp(H | θ, Ψ, ν) p(Y | θ) p(θ | α)]
-#         = E_q(Z, Λ)q(Φ)[logp(W | Z, R, Φ) p(R | Λ)] + E_q(Y, Z)q(Ψ)[logp(Z | X) p(X | Y, Ψ)] + E_q(H, Y)q(Ψ)[logp(H | θ, Ψ, ν) p(Y | θ) p(θ | α)]
+# logq(Ω) ∝ E_q(Ξ)q(χ)[logp(W | Z, R, Φ) p(R | Λ)] + E_q(Ξ)q(χ)[logp(Z | X) p(X | Y, Ψ)] + E_q(Ξ)q(χ)[logp(ν | θ, Ψ) p(Y | θ) p(θ | α)]
+#         = E_q(Z, Λ)q(Φ)[logp(W | Z, R, Φ) p(R | Λ)] + E_q(Y, Z)q(Ψ)[logp(Z | X) p(X | Y, Ψ)] + E_q(Y)q(Ψ)[logp(ν | θ, Ψ) p(Y | θ) p(θ | α)]
 #         = logq(R) + logq(X) + logq(θ)
-# logq(Ξ) ∝ E_q(Ω)q(χ)[logp(H | θ, Ψ, ν)] + E_q(Ω)q(χ)[logp(X | Y, Ψ) p(Y | θ)] + E_q(Ω)q(χ)[logp(W | Z, R, Φ) p(Z | X)] + E_q(Ω)q(χ)[logp(R | Λ) p(Λ | η)]
-#         = E_q(θ)q(Ψ)[logp(H | θ, Ψ, ν)] + E_q(X, θ)q(Ψ)[logp(X | Y, Ψ) p(Y | θ)] + E_q(R, X)q(Φ)[logp(W | Z, R, Φ) p(Z | X)] + E_q(R)[logp(R | Λ) p(Λ | η)]
-#         = logq(H) + logq(Y) + logq(Z) + logq(Λ)
-# logq(χ) ∝ E_q(Ω)q(Ξ)[logp(H | θ, Ψ, ν) p(X | Y, Ψ) p(Ψ | γ)] + E_q(Ω)q(Ξ)[logp(W | Z, R, Φ) p(Φ | β)]
-#         = E_q(X, θ)q(H, Y)[logp(H | θ, Ψ, ν) p(X | Y, Ψ) p(Ψ | γ)] + E_q(R)q(Z)[logp(W | Z, R, Φ) p(Φ | β)]
+# logq(Ξ) ∝ E_q(Ω)q(χ)[logp(X | Y, Ψ) p(Y | θ)] + E_q(Ω)q(χ)[logp(W | Z, R, Φ) p(Z | X)] + E_q(Ω)q(χ)[logp(R | Λ) p(Λ | η)]
+#         = E_q(X, θ)q(Ψ)[logp(X | Y, Ψ) p(Y | θ)] + E_q(R, X)q(Φ)[logp(W | Z, R, Φ) p(Z | X)] + E_q(R)[logp(R | Λ) p(Λ | η)]
+#         = logq(Y) + logq(Z) + logq(Λ)
+# logq(χ) ∝ E_q(Ω)q(Ξ)[logp(ν | θ, Ψ) p(X | Y, Ψ) p(Ψ | γ)] + E_q(Ω)q(Ξ)[logp(W | Z, R, Φ) p(Φ | β)]
+#         = E_q(X, θ)q(Y)[logp(ν | θ, Ψ) p(X | Y, Ψ) p(Ψ | γ)] + E_q(R)q(Z)[logp(W | Z, R, Φ) p(Φ | β)]
 #         = logq(Ψ) + logq(Φ)
 
-# q(Λ) ∝ Beta((Σ_d Σ_n q_dn) + η[0], (D N_d - (Σ_d Σ_n q_dn)) + η[1])  q_dn 〜 q(R)
-# q(Φ) ∝ Dirichlet_0((Σ_d Σ_n:(v=W_dn) (1 - q_dn)) + β)  q_dn 〜 q(R)
-    #    Dirichlet_l((Σ_d Σ_n:(v=W_dn) q_dn q_dnl) + β)  q_dn 〜 q(R)  q_dnl 〜 q(Z)
-# q(X) ∝ Dirichlet(X_d | Σ_n q_dnl + Σ_m Σ_k q_dmk {q_kl / Σ_l q_kl - 1} + 1)  q_dnl 〜 q(Z)  q_dmk 〜 q(Y)  q_kl 〜 q(Ψ)
-# q(θ) ∝ 
+# q(Λ) ∝ Beta((Σ_d Σ_v q_dv) + η[0], (D V_d - (Σ_d Σ_v q_dv)) + η[1])  q_dv 〜 q(R)
+# サイズ : 2
+# 外形  : ベータ分布
+# 連続確立分布
 
-# q(Ψ) ∝ Π_d Dirichlet(X_d | 1 + Σ_m Σ_k q_dmk q_dl {ψ_kl - 1})  Π_k Dirichlet(ψ_k | γ)
-# q(θ) ∝ exp(Σ_l ∫ q_dl q_kl log(Σ_k θ_dk ψ_kl)_l^ν_l dHdΨ) Dirichlet(1 + Σ_m q_dmk (I(y_dm = k) + α - 1))  q_dl 〜 q(H)  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
-# q(X) ∝ exp(Σ_m Σ_k q_dmk logx_dl ∫ q(ψ_k) (ψ_k - 1) dψ_k) Dirichlet(1 + Σ_n q_dnl)  q_dmk 〜 q(Y)  q(ψ_k) 〜 q(Ψ)  q_dnl 〜 q(Z)
-# q(Ψ) ∝ Π_d Dirichlet(X_d | 1 + Σ_m Σ_k q_dmk q_dl {ψ_kl - 1})  Π_k Dirichlet(ψ_k | γ)
+# q(Φ) ∝ Dirichlet_0((Σ_d Σ_n:(v=W_dn) (1 - q_dv)) + β)  q_dv 〜 q(R)
+    #    Dirichlet_l((Σ_d Σ_n:(v=W_dn) q_dv q_dnl) + β)  q_dv 〜 q(R)  q_dnl 〜 q(Z)
+# サイズ : (1 + 単語トピック数L) × 語彙数V
+# 外形  : ディリクレ分布
+# 連続確立分布
+
+# q(R) ∝ exp(digamma(q_a) - digamma(q_a + q_b) + (Σ_l (digamma(q_lv) - digamma(Σ_v q_lv)) Σ_n:(v=W_dn) q_dnl))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ)
+# サイズ : 文書数D × 語彙数V
+# 外形  : 不明
+# 離散確立分布
+
+# q(X) ∝ Dirichlet(X_d | Σ_n q_dnl + Σ_m Σ_k q_dmk {q_kl / Σ_l q_kl - 1} + 1)  q_dnl 〜 q(Z)  q_dmk 〜 q(Y)  q_kl 〜 q(Ψ)
+# サイズ : 文書数D × 単語トピック数L
+# 外形  : ディリクレ分布
+# 連続確立分布
+
+# logq(θ) ∝ Σ_d Σ_k {Σ_l θ_dk logν_dl^(q_kl / (Σ_l q_kl) + (K-1) ψ_kl)} + logθ_dk^{Σ_m q_dmk + α - 1}  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
+# ブラックボックス変分推定 対象関数
+# サイズ : 文書数D × 感情トピック数Κ
+# 外形  : ディリクレ分布
+# 連続確立分布
+
+# logq(Ψ) ∝ Σ_k {Σ_l {ψ_kl Σ_d q_dk / (Σ_k q_dk) logν_dl + Σ_m q_dmk (digamma(q_dl) - digamma(Σ_l q_dl))} + logψ_kl^(γ - 1)}  q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dl 〜 q(X)
+# ブラックボックス変分推定 対象関数
+# サイズ : 感情トピック数Κ × 単語トピック数L
+# 外形  : ディリクレ分布
+# 連続確立分布
+
+# q(Y) ∝ 
+# サイズ : 文書数D × 感情サンプル数M_d × 感情トピック数Κ
+# 外形  : 不明
+# 離散確立分布
+
+# q(Z) ∝ 
+# サイズ : 文書数D × 単語数N_d × 単語トピック数L
+# 外形  : 不明
+# 離散確立分布
 
 
 class Harmonized_Sentiment_Topic_Model_In_VB:
