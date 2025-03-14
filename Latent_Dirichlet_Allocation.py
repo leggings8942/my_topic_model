@@ -885,29 +885,31 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 # 外形  : 不明
 # 離散確立分布
 
-# q(X) ∝ Dirichlet(X_d | Σ_n q_dnl + Σ_m Σ_k q_dmk {q_kl / Σ_l q_kl - 1} + 1)  q_dnl 〜 q(Z)  q_dmk 〜 q(Y)  q_kl 〜 q(Ψ)
-# サイズ : 文書数D × 単語トピック数L
+# q(X) ∝ Dirichlet(X_d | Σ_n q_dnl + Σ_k q_dmk {q_kl / Σ_l q_kl - 1} + 1)  q_dnl 〜 q(Z)  q_dmk 〜 q(Y)  q_kl 〜 q(Ψ)
+# サイズ : 文書数D × 感情サンプル数M_d × 単語トピック数L
 # 外形  : ディリクレ分布
 # 連続確立分布
 
 # logq(θ) ∝ Σ_d Σ_k {Σ_l θ_dk logν_dl^(q_kl / (Σ_l q_kl) + (K-1) ψ_kl)} + logθ_dk^{Σ_m q_dmk + α - 1}  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
 # ブラックボックス変分推定 対象関数
+# 
 # サイズ : 文書数D × 感情トピック数Κ
 # 外形  : ディリクレ分布
 # 連続確立分布
 
-# logq(Ψ) ∝ Σ_k {Σ_l {ψ_kl Σ_d q_dk / (Σ_k q_dk) logν_dl + Σ_m q_dmk (digamma(q_dl) - digamma(Σ_l q_dl))} + logψ_kl^(γ - 1)}  q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dl 〜 q(X)
+# logq(Ψ) ∝ Σ_k Σ_l {ψ_kl {Σ_d q_dk / (Σ_k q_dk) logν_dl + Σ_m q_dmk (digamma(q_dml) - digamma(Σ_l q_dml))} + logψ_kl^(γ - 1)}  q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dml 〜 q(X)
 # ブラックボックス変分推定 対象関数
+# 
 # サイズ : 感情トピック数Κ × 単語トピック数L
 # 外形  : ディリクレ分布
 # 連続確立分布
 
-# q(Y) ∝ 
+# q(Y) ∝ exp(digamma(q_dk) - digamma(Σ_k q_dk) + {Σ_l (q_kl / (Σ_l q_kl) - 1) (digamma(q_dml) - digamma(Σ_l q_dml))})  q_dk 〜 q(θ)  q_kl 〜 q(Ψ)  q_dml 〜 q(X)
 # サイズ : 文書数D × 感情サンプル数M_d × 感情トピック数Κ
 # 外形  : 不明
 # 離散確立分布
 
-# q(Z) ∝ 
+# q(Z) ∝ exp(digamma(q_dl) - digamma(Σ_l q_dl) + q_d(w_dn) {digamma(q_l(w_dn)) - digamma(Σ_v q_lv)} + (1 - q_d(w_dn)) {digamma(q_0(w_dn)) - digamma(Σ_v q_0v)})  q_dl 〜 q(X)  q_dv 〜 q(R)  q_lv 〜 q(Φ)
 # サイズ : 文書数D × 単語数N_d × 単語トピック数L
 # 外形  : 不明
 # 離散確立分布
