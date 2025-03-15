@@ -790,14 +790,14 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 #               ii.  関係性 r_dn 〜 Bernoulli(λ)
 #               iii. 単語 w_dn 〜 Categorical(φ_(z_dn)) if r_dn == 1 else Categorical(φ_0)
 
-# この感情分析モデルを構築するにあたり、新しい確立分布を定義した
+# この感情分析モデルを構築するにあたり、新しい確率分布を定義した
 # Σ_i p_i = 1
 # C_i : 非負の実数
 # x_i ∈ [0, C_i]
 # Nagino(x | p, C) = Π_i (p_i / C_i^(p_i)) x_i^(p_i - 1)
-# この確立分布はベータ分布の多変量への拡張である。そのような確立分布としてはディリクレ分布があげられる。
+# この確率分布はベータ分布の多変量への拡張である。そのような確率分布としてはディリクレ分布があげられる。
 # ディリクレ分布と似ている部分も多く見られるが、制約条件的な部分で違いがある
-# この確立分布の期待値と分散を以下に示す
+# この確率分布の期待値と分散を以下に示す
 # E(x_i) = (p_i / (1 + p_i)) C_i
 # V(x_i) = (p_i / ((1 + p_i)^2 (2 + p_i))) C_i^2
 
@@ -872,47 +872,48 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 # q(Λ) ∝ Beta((Σ_d Σ_v q_dv) + η[0], (D V_d - (Σ_d Σ_v q_dv)) + η[1])  q_dv 〜 q(R)
 # サイズ : 2
 # 外形  : ベータ分布
-# 連続確立分布
+# 連続確率分布
 
 # q(Φ) ∝ Dirichlet_0((Σ_d Σ_n:(v=W_dn) (1 - q_dv)) + β)  q_dv 〜 q(R)
     #    Dirichlet_l((Σ_d Σ_n:(v=W_dn) q_dv q_dnl) + β)  q_dv 〜 q(R)  q_dnl 〜 q(Z)
 # サイズ : (1 + 単語トピック数L) × 語彙数V
 # 外形  : ディリクレ分布
-# 連続確立分布
+# 連続確率分布
 
 # q(R) ∝ exp(digamma(q_a) - digamma(q_a + q_b) + (Σ_l (digamma(q_lv) - digamma(Σ_v q_lv)) Σ_n:(v=W_dn) q_dnl))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ)
 # サイズ : 文書数D × 語彙数V
 # 外形  : 不明
-# 離散確立分布
+# 離散確率分布
 
 # q(X) ∝ Dirichlet(X_d | Σ_n q_dnl + Σ_k q_dmk {q_kl / Σ_l q_kl - 1} + 1)  q_dnl 〜 q(Z)  q_dmk 〜 q(Y)  q_kl 〜 q(Ψ)
 # サイズ : 文書数D × 感情サンプル数M_d × 単語トピック数L
 # 外形  : ディリクレ分布
-# 連続確立分布
-
-# logq(θ) ∝ Σ_d Σ_k {Σ_l θ_dk logν_dl^(q_kl / (Σ_l q_kl) + (K-1) ψ_kl)} + logθ_dk^{Σ_m q_dmk + α - 1}  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
-# ブラックボックス変分推定 対象関数
-# 
-# サイズ : 文書数D × 感情トピック数Κ
-# 外形  : ディリクレ分布
-# 連続確立分布
+# 連続確率分布
 
 # logq(Ψ) ∝ Σ_k Σ_l {ψ_kl {Σ_d q_dk / (Σ_k q_dk) logν_dl + Σ_m q_dmk (digamma(q_dml) - digamma(Σ_l q_dml))} + logψ_kl^(γ - 1)}  q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dml 〜 q(X)
 # ブラックボックス変分推定 対象関数
-# 
+# δF / δq_kl = (1 - q_kl / (Σ_l q_kl)) / (Σ_k q_kl) {Σ_d q_dk / (Σ_k q_dk) logν_dl + {Σ_m q_dmk (digamma(q_dml) - digamma(Σ_l q_dml))}} + digamma(Σ_k q_kl) - digamma(q_kl) + (γ - q_kl) (polygamma(1, q_kl) - polygamma(1, Σ_l q_kl))  q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dml 〜 q(X)  q_kl 〜 q(Ψ)
 # サイズ : 感情トピック数Κ × 単語トピック数L
 # 外形  : ディリクレ分布
-# 連続確立分布
+# 連続確率分布
+
+# logq(θ) ∝ Σ_d Σ_k {Σ_l θ_dk logν_dl^(q_kl / (Σ_l q_kl) + (K-1) ψ_kl)} + logθ_dk^{Σ_m q_dmk + α - 1}  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
+    #     ≒ Σ_d Σ_k {Σ_l θ_dk logν_dl^(K q_kl / (Σ_l q_kl))} + logθ_dk^{Σ_m q_dmk + α - 1}  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
+# ブラックボックス変分推定 対象関数
+# δlogF / δq_dk = Σ_l {logν_dl^(K q_kl / (Σ_l q_kl)) (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk)} + digamma(Σ_k q_dk) - digamma(q_dk) + (Σ_m q_dmk + α - q_dk) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk))  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
+# サイズ : 文書数D × 感情トピック数Κ
+# 外形  : ディリクレ分布
+# 連続確率分布
 
 # q(Y) ∝ exp(digamma(q_dk) - digamma(Σ_k q_dk) + {Σ_l (q_kl / (Σ_l q_kl) - 1) (digamma(q_dml) - digamma(Σ_l q_dml))})  q_dk 〜 q(θ)  q_kl 〜 q(Ψ)  q_dml 〜 q(X)
 # サイズ : 文書数D × 感情サンプル数M_d × 感情トピック数Κ
 # 外形  : 不明
-# 離散確立分布
+# 離散確率分布
 
 # q(Z) ∝ exp(digamma(q_dl) - digamma(Σ_l q_dl) + q_d(w_dn) {digamma(q_l(w_dn)) - digamma(Σ_v q_lv)} + (1 - q_d(w_dn)) {digamma(q_0(w_dn)) - digamma(Σ_v q_0v)})  q_dl 〜 q(X)  q_dv 〜 q(R)  q_lv 〜 q(Φ)
 # サイズ : 文書数D × 単語数N_d × 単語トピック数L
 # 外形  : 不明
-# 離散確立分布
+# 離散確率分布
 
 
 class Harmonized_Sentiment_Topic_Model_In_VB:
