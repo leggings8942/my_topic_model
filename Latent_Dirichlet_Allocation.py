@@ -774,19 +774,19 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 #   (f) C:array[Float64] 所与の定数
 # 2. 一般単語分布 φ_0 〜 Dirichlet(β)
 # 3. 関係性分布 λ 〜 Beta(η)
-# 4. For 感情トピック k = 1, ... K
+# 4. For トピック k = 1, ... K
 #       (a) 感情分布 ψ_k 〜 Dirichlet(γ)
-# 5. For 単語トピック l = 1, ... 8
-#       (a) 単語分布 φ_l 〜 Dirichlet(β)
+# 5. For 感情トピック l = 1, ... 8
+#       (a) 感情単語分布 φ_l 〜 Dirichlet(β)
 # 6. For 文書 d = 1, ... D
-#       (a) 感情トピック分布 θ_d 〜 Dirichlet(α)
+#       (a) トピック分布 θ_d 〜 Dirichlet(α)
 #       (b) For 感情サンプル m = 1, ... M_d
-#               i.  感情トピック y_dm 〜 Categorical(θ_d)
+#               i.  トピックラベル y_dm 〜 Categorical(θ_d)
 #               ii. 感情分布 x_dm 〜 Dirichlet(ψ_(y_dm))
 #       (c) 文書感情尤度 ν_d 〜 Nagino(Σ_k θ_dk ψ_k, C)
 #       (d) 文書感情分布 x_d = x_d1 + x_d2 + ... + x_d(M_d)
 #       (e) For 各単語 n = 1, ... N_d
-#               i.   単語トピック z_dn 〜 Categorical(x_d)
+#               i.   感情トピック z_dn 〜 Categorical(x_d)
 #               ii.  関係性 r_dn 〜 Bernoulli(λ)
 #               iii. 単語 w_dn 〜 Categorical(φ_(z_dn)) if r_dn == 1 else Categorical(φ_0)
 
@@ -827,16 +827,18 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 # ・対応トピックモデルの亜種であるため、感情ラベルと単語分布の間に関連性がある
 # ・ノイズありモデルの亜種であるため、感情ラベルと直接関係ない単語分布を推定できる
 # ・JSTモデルと比較して、一つの文書に対して以下の仮定を行う
-#       ・各単語は単一の感情分布を持つ
-#       ・各単語は単一のトピックラベルを持つ
-#       ・各トピックラベルは複数の感情ラベルと関連する
-#       ・各感情ラベルは複数のトピックラベルと関連する
-#       ・各トピックラベルは他のトピックラベルと感情ラベルが重複することを許す
-#       ・各感情ラベルは他の感情ラベルとトピックラベルが重複することを許す
+#       ・各文書は単一の感情分布を持つ
+#       ・各文書は複数のトピックラベルを持つ
+#       ・各単語は単一の感情トピックを持つ
+#       ・各トピックは複数の感情トピックと関連する
+#       ・各感情トピックは複数のトピックと関連する
+#       ・各トピックは他のトピックと感情トピックが重複することを許す
+#       ・各感情トピックは他の感情トピックとトピックが重複することを許す
 # ・必要メモリ量がJSTモデルと比較して少ない
 
-# モデル構築にあたって独立性の仮定を以下のように定義する
-# q(R, Z, H, X, Y, θ, Φ, Ψ, Λ) = q(R, X, θ)q(H, Y, Z, Λ)q(Ψ, Φ)
+# モデル構築にあたっていくつかの仮定を置いた、以下に示す
+# 変分対象のパラメータがそれぞれ以下のような独立性を持つと仮定する
+#   q(R, Z, X, Y, θ, Φ, Ψ, Λ) = q(R, X, θ)q(Y, Z, Λ)q(Ψ, Φ)
 # x_d ≒ x_dm : 総感情サンプル分布と各感情サンプル分布がほぼ等しいと仮定する
 
 # ベイズ自由エネルギー最適化を以下の数式を最小化することによって行う
@@ -849,7 +851,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 
 # 参考：
 # 平均値の算出式が離散な分布：Bernoulli、Categorical
-# 平均値の算出式が連続な分布：Beta、Dirichlet,Nagino
+# 平均値の算出式が連続な分布：Beta、Dirichlet、Nagino
 
 # p(W, ν, Ω, Ξ, χ)
 # = p(W, ν, R, Z, X, Y, θ, Φ, Ψ, Λ)
@@ -871,30 +873,30 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 
 # q(Λ) ∝ Beta((Σ_d Σ_v q_dv) + η[0], (D V_d - (Σ_d Σ_v q_dv)) + η[1])  q_dv 〜 q(R)
 # サイズ : 2
-# 外形  : ベータ分布
+# 形状  : ベータ分布
 # 連続確率分布
 
 # q(Φ) ∝ Dirichlet_0((Σ_d Σ_n:(v=W_dn) (1 - q_dv)) + β)  q_dv 〜 q(R)
     #    Dirichlet_l((Σ_d Σ_n:(v=W_dn) q_dv q_dnl) + β)  q_dv 〜 q(R)  q_dnl 〜 q(Z)
 # サイズ : (1 + 単語トピック数L) × 語彙数V
-# 外形  : ディリクレ分布
+# 形状  : ディリクレ分布
 # 連続確率分布
 
 # q(R) ∝ exp(digamma(q_a) - digamma(q_a + q_b) + (Σ_l (digamma(q_lv) - digamma(Σ_v q_lv)) Σ_n:(v=W_dn) q_dnl))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ)
 # サイズ : 文書数D × 語彙数V
-# 外形  : 不明
+# 形状  : 不明
 # 離散確率分布
 
 # q(X) ∝ Dirichlet(X_d | Σ_n q_dnl + Σ_k q_dmk {q_kl / Σ_l q_kl - 1} + 1)  q_dnl 〜 q(Z)  q_dmk 〜 q(Y)  q_kl 〜 q(Ψ)
 # サイズ : 文書数D × 感情サンプル数M_d × 単語トピック数L
-# 外形  : ディリクレ分布
+# 形状  : ディリクレ分布
 # 連続確率分布
 
 # logq(Ψ) ∝ Σ_k Σ_l {ψ_kl {Σ_d q_dk / (Σ_k q_dk) logν_dl + Σ_m q_dmk (digamma(q_dml) - digamma(Σ_l q_dml))} + logψ_kl^(γ - 1)}  q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dml 〜 q(X)
 # ブラックボックス変分推定 対象関数
 # δF / δq_kl = (1 - q_kl / (Σ_l q_kl)) / (Σ_k q_kl) {Σ_d q_dk / (Σ_k q_dk) logν_dl + {Σ_m q_dmk (digamma(q_dml) - digamma(Σ_l q_dml))}} + digamma(Σ_k q_kl) - digamma(q_kl) + (γ - q_kl) (polygamma(1, q_kl) - polygamma(1, Σ_l q_kl))  q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dml 〜 q(X)  q_kl 〜 q(Ψ)
 # サイズ : 感情トピック数Κ × 単語トピック数L
-# 外形  : ディリクレ分布
+# 形状  : ディリクレ分布
 # 連続確率分布
 
 # logq(θ) ∝ Σ_d Σ_k {Σ_l θ_dk logν_dl^(q_kl / (Σ_l q_kl) + (K-1) ψ_kl)} + logθ_dk^{Σ_m q_dmk + α - 1}  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
@@ -902,17 +904,17 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 # ブラックボックス変分推定 対象関数
 # δlogF / δq_dk = Σ_l {logν_dl^(K q_kl / (Σ_l q_kl)) (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk)} + digamma(Σ_k q_dk) - digamma(q_dk) + (Σ_m q_dmk + α - q_dk) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk))  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
 # サイズ : 文書数D × 感情トピック数Κ
-# 外形  : ディリクレ分布
+# 形状  : ディリクレ分布
 # 連続確率分布
 
 # q(Y) ∝ exp(digamma(q_dk) - digamma(Σ_k q_dk) + {Σ_l (q_kl / (Σ_l q_kl) - 1) (digamma(q_dml) - digamma(Σ_l q_dml))})  q_dk 〜 q(θ)  q_kl 〜 q(Ψ)  q_dml 〜 q(X)
 # サイズ : 文書数D × 感情サンプル数M_d × 感情トピック数Κ
-# 外形  : 不明
+# 形状  : 不明
 # 離散確率分布
 
 # q(Z) ∝ exp(digamma(q_dl) - digamma(Σ_l q_dl) + q_d(w_dn) {digamma(q_l(w_dn)) - digamma(Σ_v q_lv)} + (1 - q_d(w_dn)) {digamma(q_0(w_dn)) - digamma(Σ_v q_0v)})  q_dl 〜 q(X)  q_dv 〜 q(R)  q_lv 〜 q(Φ)
 # サイズ : 文書数D × 単語数N_d × 単語トピック数L
-# 外形  : 不明
+# 形状  : 不明
 # 離散確率分布
 
 
