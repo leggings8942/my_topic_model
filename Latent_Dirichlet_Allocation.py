@@ -584,10 +584,10 @@ class LDA_In_VB:
                     q_dn   = q_dn / np.sum(q_dn)
                     
                     # トピック分布のハイパーパラメータの計算
-                    θ_new[idx_doc, :] = θ_new[idx_doc, :] + q_dn
+                    θ_new[idx_doc, :] += θ_new[idx_doc, :] + q_dn
                 
                     # 単語分布のハイパーパラメータの計算
-                    Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] = Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + q_dn
+                    Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] += Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + q_dn
             
             # デバッグ出力
             error = np.sum(np.square(self.topic_θ_αk - θ_new)) + np.sum(np.square(self.word_Φ_βv - Φ_new))
@@ -919,7 +919,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 
 
 class Harmonized_Sentiment_Topic_Model_In_VB:
-    def __init__(self, train_data:pd.DataFrame, stop_word:frozenset[str], tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
+    def __init__(self, train_data:pd.DataFrame, train_labels:pd.DataFrame, stop_word:frozenset[str], label_max_value:float=4, tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
         
@@ -928,8 +928,34 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             print("エラー：：Pandas DataFrameである必要があります。")
             raise
         
+        if type(train_labels) is not pd.DataFrame:
+            print(f"type(train_labels) = {type(train_labels)}")
+            print("エラー：：Pandas DataFrameである必要があります。")
+            raise
+        
+        # index部分の初期化
+        train_data   = train_data.reset_index(drop=True)
+        train_labels = train_labels.reset_index(drop=True)
+        
+        # ラベルデータに対する前処理
+        train_labels[train_labels < 0] = 0
+        train_labels[train_labels > label_max_value] = label_max_value
+        
+        if len(train_data) != len(train_labels):
+            print(f"len(train_data)   = {len(train_data)}")
+            print(f"len(train_labels) = {len(train_labels)}")
+            print("エラー：：与えられたデータ列に誤りがあります。")
+            raise
+        
+        # DataFrameの整形
+        train_data = train_data['text']
+        train_data = pd.concat([train_data, train_labels], axis=1)
+        
         self.train_data  = train_data
         self.doc_num     = len(train_data)
+        self.label_num   = len(train_labels.columns)
+        self.stop_word   = stop_word
+        self.label_max   = label_max_value
         self.tol         = tol
         self.topic_num   = topic_num
         self.max_iterate = max_iterate
@@ -939,12 +965,13 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         tokenize_mode = tokenizer.Tokenizer.SplitMode.C
         
         vocab_count = 0
-        word_count  = [{} for _ in range(0, self.doc_num)]
         self.W2I    = {}
         self.DI2W   = [{} for _ in range(0, self.doc_num)]
+        self.DW2I   = [{} for _ in range(0, self.doc_num)]
+        self.DCNT   = [{} for _ in range(0, self.doc_num)]
         DEL_IDX     = []
         for idx in range(0, self.doc_num):
-            doc    = train_data.iat[idx, 0]
+            doc    = train_data.iat[idx, 'text']
             tokens = tokenizer_obj.tokenize(doc, tokenize_mode)
             doc_w_count = 0
             for node in tokens:
@@ -959,13 +986,15 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                     self.W2I[word]  = vocab_count
                     vocab_count    += 1
                 
-                if (word in word_count[idx]) and (hinshi in self.target_POS):
+                if (word in self.DCNT[idx]) and (hinshi in self.target_POS):
                     self.DI2W[idx][doc_w_count] = word
-                    word_count[idx][word] += 1
+                    self.DW2I[idx][word].append(doc_w_count)
+                    self.DCNT[idx][word] += 1
                     doc_w_count += 1
                 elif hinshi in self.target_POS:
                     self.DI2W[idx][doc_w_count] = word
-                    word_count[idx][word]  = 1
+                    self.DW2I[idx][word] = [doc_w_count]
+                    self.DCNT[idx][word] = 1
                     doc_w_count += 1
             
             # 空の文書を登録
@@ -973,61 +1002,146 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                 DEL_IDX.append(idx)
         
         # 空の文書を削除
-        self.train_data  = train_data.drop(train_data.index[DEL_IDX]).reset_index(drop=True)
-        self.doc_num     = len(self.train_data)
-        self.DI2W        = [elem for elem in self.DI2W  if elem != {}]
-        word_count       = [elem for elem in word_count if elem != {}]
+        self.train_data = train_data.drop(train_data.index[DEL_IDX]).reset_index(drop=True)
+        self.doc_num    = len(self.train_data)
+        self.DI2W       = [elem for elem in self.DI2W if elem != {}]
+        self.DW2I       = [elem for elem in self.DW2I if elem != {}]
+        self.DCNT       = [elem for elem in self.DCNT if elem != {}]
         
+        # 解析結果の保存
+        self.vocab_num  = vocab_count
+        self.doc_v_num  = np.array([len(self.DCNT[idx])                   for idx in range(0, self.doc_num)], dtype=int)
+        self.doc_w_num  = np.array([np.sum(list(self.DCNT[idx].values())) for idx in range(0, self.doc_num)], dtype=int)
+        self.relat_R_η  = 0.5
+        self.topic_θ_α  = 1 / self.vocab_num
+        self.word_Φ_β   = 1 / self.vocab_num
+        self.senti_Ψ_γ  = 1 / self.vocab_num
+        
+        # 乱数の設定
         self.random_state = random_state
         if random_state != None:
             self.random = np.random.default_rng(seed=self.random_state)
         else:
             self.random = np.random.default_rng()
         
-        self.vocab_num  = vocab_count
-        self.doc_w_num  = np.array([np.sum([val for val in word_count[idx].values()]) for idx in range(0, self.doc_num)], dtype=int)
-        self.topic_θ_αk = np.array([self.random.random((self.topic_num,)) for _ in range(0, self.doc_num)])
-        self.word_Φ_βv  = np.array([self.random.random((self.vocab_num,)) for _ in range(0, self.topic_num)])
-        self.topic_θ_α  = 1 / self.vocab_num
-        self.word_Φ_β   = 1 / self.vocab_num
+        # 各種変分事後分布の初期化
+        self.Λ  = self.random.random(2)
+        self.Φ0 = self.random.random(size=(1,              self.vocab_num))
+        self.Φ1 = self.random.random(size=(self.label_num, self.vocab_num))
+        self.Ψ  = self.random.random(size=(self.topic_num, self.label_num))
+        self.θ  = self.random.random(size=(self.doc_num,   self.topic_num))
+        self.Y  = self.random.random(size=(self.doc_num, max(self.doc_w_num), self.topic_num))
+        self.X  = self.random.random(size=(self.doc_num, max(self.doc_w_num), self.label_num))
+        self.Z  = self.random.random(size=(self.doc_num, max(self.doc_w_num), self.label_num))
+        self.R  = self.random.random(size=(self.doc_num, self.vocab_num))
+        
+        # 各種変分事後分布の確率変数化
+        self.Λ = self.Λ / np.sum(self.Λ)
+        self.Φ = self.Φ / np.sum(self.Φ)
+        self.Ψ = self.Ψ / np.sum(self.Ψ)
+        self.θ = self.θ / np.sum(self.θ)
+        self.Y = self.Y / np.sum(self.Y)
+        self.X = self.X / np.sum(self.X)
+        self.Z = self.Z / np.sum(self.Z)
     
     def fit(self) -> bool:
         # 学習開始
         for idx in range(0, self.max_iterate):
-            θ_new = np.zeros_like(self.topic_θ_αk) + self.topic_θ_α
-            Φ_new = np.zeros_like(self.word_Φ_βv)  + self.word_Φ_β
+            # 初期化
+            Λ_new  = np.zeros_like(self.Λ)
+            Φ0_new = np.zeros_like(self.Φ0) + self.word_Φ_β
+            Φ1_new = np.zeros_like(self.Φ1) + self.word_Φ_β
+            Ψ_new  = np.zeros_like(self.Ψ)
+            θ_new  = np.zeros_like(self.θ)
+            Y_new  = np.zeros_like(self.Y)
+            X_new  = np.zeros_like(self.X)
+            Z_new  = np.zeros_like(self.Z)
+            R_new  = np.zeros_like(self.R)
+            
+            # q(Λ) ∝ Beta((Σ_d Σ_v q_dv) + η[0], (D V_d - (Σ_d Σ_v q_dv)) + η[1])  q_dv 〜 q(R)
+            s_q_dv   = np.sum([self.R[d, 0:self.doc_v_num[d]] for d in range(0, self.doc_num)])
+            Λ_new[0] = s_q_dv + self.relat_R_η
+            Λ_new[1] = np.sum(self.doc_v_num) - s_q_dv + self.relat_R_η
+            
+            # 文書dごとにループ
             for idx_doc in range(0, self.doc_num):
-                for idx_doc_w in range(0, self.doc_w_num[idx_doc]):
-                    # 負担率の計算
-                    avg_qθ = digamma(self.topic_θ_αk[idx_doc]) - digamma(np.sum(self.topic_θ_αk[idx_doc]))
-                    avg_qΦ = digamma(self.word_Φ_βv[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) - digamma(np.sum(self.word_Φ_βv, axis=1))
-                    q_dn   = np.exp(avg_qθ + avg_qΦ)
-                    q_dn   = q_dn / np.sum(q_dn)
+                # q(R) ∝ exp(digamma(q_a) - digamma(q_a + q_b) + (Σ_l (digamma(q_lv) - digamma(Σ_v q_lv)) Σ_n:(v=W_dn) q_dnl))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ)
+                for word in self.DW2I[idx_doc]:
+                    q_Λ  = np.exp(digamma(self.Λ[0]) - digamma(self.Λ[0] + self.Λ[1]))
                     
-                    # トピック分布のハイパーパラメータの計算
-                    θ_new[idx_doc, :] = θ_new[idx_doc, :] + q_dn
+                    q_ZΦ = 0
+                    for idx_doc_idx in self.DW2I[idx_doc][word]:
+                        q_ZΦ += np.sum(self.Z[idx_doc, idx_doc_idx, :] * (digamma(self.Φ[:, self.W2I[word]]) - digamma(np.sum(self.Φ, axis=1))))
+                    q_ZΦ = np.exp(q_ZΦ)
+                    
+                    R_new[idx_doc, self.W2I[word]] = q_Λ * q_ZΦ
                 
-                    # 単語分布のハイパーパラメータの計算
-                    Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] = Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + q_dn
+                # 感情サンプルごとにループ
+                # 感情サンプル数は文書dごとの語彙数と等しいとする
+                for idx_doc_s in range(0, self.doc_v_num[idx_doc]):
+                    # q(Y) ∝ exp(digamma(q_dk) - digamma(Σ_k q_dk) + {Σ_l (q_kl / (Σ_l q_kl) - 1) (digamma(q_dml) - digamma(Σ_l q_dml))})  q_dk 〜 q(θ)  q_kl 〜 q(Ψ)  q_dml 〜 q(X)
+                    for idx_doc_k in range(0, self.topic_num):
+                        ratio = self.Ψ[idx_doc_k, :] / np.sum(self.Ψ[idx_doc_k, :])
+                        q_XΨ = np.sum((ratio - 1) * (digamma(self.X[idx_doc, idx_doc_s, :]) - digamma(np.sum(self.X[idx_doc, idx_doc_s, :]))))
+                        q_θ  = digamma(self.θ[idx_doc, idx_doc_k]) - digamma(np.sum(self.θ[idx_doc, :]))
+                        
+                        Y_new[idx_doc, idx_doc_s, idx_doc_k] = np.exp(q_XΨ + q_θ)
+                    
+                    # δF / δq_kl = (1 - q_kl / (Σ_l q_kl)) / (Σ_k q_kl) {Σ_d q_dk / (Σ_k q_dk) logν_dl + {Σ_m q_dmk (digamma(q_dml) - digamma(Σ_l q_dml))}} + digamma(Σ_k q_kl) - digamma(q_kl) + (γ - q_kl) (polygamma(1, q_kl) - polygamma(1, Σ_l q_kl))  q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dml 〜 q(X)  q_kl 〜 q(Ψ)
+                    # サイズ : 感情トピック数Κ × 単語トピック数L
+                    # 形状  : ディリクレ分布
+                    # 連続確率分布
+                    
+                    # δlogF / δq_dk = Σ_l {logν_dl^(K q_kl / (Σ_l q_kl)) (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk)} + digamma(Σ_k q_dk) - digamma(q_dk) + (Σ_m q_dmk + α - q_dk) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk))  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
+                    # サイズ : 文書数D × 感情トピック数Κ
+                    # 形状  : ディリクレ分布
+                    # 連続確率分布
+                
+                # 単語ごとにループ
+                for idx_doc_w in range(0, self.doc_w_num[idx_doc]):
+                    # q(Z) ∝ exp(digamma(q_dl) - digamma(Σ_l q_dl) + q_d(w_dn) {digamma(q_l(w_dn)) - digamma(Σ_v q_lv)} + (1 - q_d(w_dn)) {digamma(q_0(w_dn)) - digamma(Σ_v q_0v)})  q_dl 〜 q(X)  q_dv 〜 q(R)  q_lv 〜 q(Φ)
+                    # サイズ : 文書数D × 単語数N_d × 単語トピック数L
+                    q_X  = digamma(self.X[idx_doc, :]) - digamma(np.sum(self.X[idx_doc, :]))
+                    q_1Φ = self.R[idx_doc, self.W2I[self.DI2W[idx_doc_w]]]       * digamma(self.Φ1[:, self.W2I[self.DI2W[idx_doc_w]]]) - digamma(np.sum(self.Φ1, axis=1))
+                    q_0Φ = (1 - self.R[idx_doc, self.W2I[self.DI2W[idx_doc_w]]]) * digamma(self.Φ0[0, self.W2I[self.DI2W[idx_doc_w]]]) - digamma(np.sum(self.Φ0, axis=1))
+                    Z_new[idx_doc, idx_doc_w, :] = np.exp(q_X + q_1Φ + q_0Φ)
+                    Z_new[idx_doc, idx_doc_w, :] = Z_new[idx_doc, idx_doc_w, :] / np.sum(Z_new[idx_doc, idx_doc_w, :])
+                    
+                    
+                    # q(Φ) ∝ Dirichlet_0((Σ_d Σ_n:(v=W_dn) (1 - q_dv)) + β)  q_dv 〜 q(R)
+                    #    Dirichlet_l((Σ_d Σ_n:(v=W_dn) q_dv q_dnl) + β)  q_dv 〜 q(R)  q_dnl 〜 q(Z)
+                    Φ0_new[0, self.W2I[self.DI2W[idx_doc_w]]] += 1 - self.R[idx_doc, self.W2I[self.DI2W[idx_doc_w]]]
+                    Φ1_new[:, self.W2I[self.DI2W[idx_doc_w]]] += self.R[idx_doc, self.W2I[self.DI2W[idx_doc_w]]]     * Z_new[idx_doc, idx_doc_w, :]
             
             # デバッグ出力
-            error = np.sum(np.square(self.topic_θ_αk - θ_new)) + np.sum(np.square(self.word_Φ_βv - Φ_new))
+            error_Λ = np.sum(np.abs(self.Λ - Λ_new))
+            error_Φ = np.sum(np.abs(self.Φ0 - Φ0_new)) + np.sum(np.abs(self.Φ1 - Φ1_new))
+            error_Ψ = np.sum(np.abs(self.Ψ - Ψ_new))
+            error_θ = np.sum(np.abs(self.θ - θ_new))
+            error_Y = np.sum(np.abs(self.Y - Y_new))
+            error_X = np.sum(np.abs(self.X - X_new))
+            error_Z = np.sum(np.abs(self.Z - Z_new))
+            error_R = np.sum(np.abs(self.R - R_new))
+            error = error_Λ + error_Φ + error_Ψ + error_θ + error_Y + error_X + error_Z + error_R
             if idx % 100 == 0:
                 print(f"学習回数：{idx}")
                 print(f"誤差：{error}")
                 print()
             
+            # 各分布の更新
+            self.Λ = Λ_new
+            self.Φ0 = Φ0_new
+            self.Φ1 = Φ1_new
+            self.Ψ = Ψ_new
+            self.θ = θ_new
+            self.Y = Y_new
+            self.X = X_new
+            self.Z = Z_new
+            self.R = R_new
+            
             # 終了条件
             if error < self.tol:
                 break
-            
-            # 各分布の更新
-            self.topic_θ_αk = θ_new
-            self.word_Φ_βv  = Φ_new
-        
-        # 各分布の更新
-        self.topic_θ_αk = θ_new
-        self.word_Φ_βv  = Φ_new
 
         return True
     
