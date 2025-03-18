@@ -141,17 +141,13 @@ class Mixture_Of_Unigram_Models_In_EM:
             θ = θ_new / np.sum(θ_new)
             Φ = Φ_new / np.sum(Φ_new, axis=1).reshape(self.topic_num, 1)
             
-            # 終了条件
-            if np.sum(np.square(self.topic_θ - θ)) + np.sum(np.square(self.word_distr - Φ)) < self.tol:
-                break
-            
             # 各分布の更新
             self.topic_θ    = θ
             self.word_distr = Φ
-        
-        # 各分布の更新
-        self.topic_θ    = θ
-        self.word_distr = Φ
+            
+            # 終了条件
+            if np.sum(np.square(self.topic_θ - θ)) + np.sum(np.square(self.word_distr - Φ)) < self.tol:
+                break
 
         return True
 
@@ -245,17 +241,13 @@ class Mixture_Of_Unigram_Models_In_VB:
                 # 単語分布の計算
                 β_new = β_new + np.outer(q_dt, N_doc[idx_doc, :])
             
-            # 終了条件
-            if np.sum(np.square(self.topic_α_k - α_new)) + np.sum(np.square(self.word_β_k - β_new)) < self.tol:
-                break
-            
             # 各分布の更新
             self.topic_α_k = α_new
             self.word_β_k  = β_new
-        
-        # 各分布の更新
-        self.topic_α_k = α_new
-        self.word_β_k  = β_new
+            
+            # 終了条件
+            if np.sum(np.square(self.topic_α_k - α_new)) + np.sum(np.square(self.word_β_k - β_new)) < self.tol:
+                break
 
         return True
 
@@ -471,17 +463,13 @@ class LDA_In_EM:
                 print(f"誤差：{error}")
                 print()
             
-            # 終了条件
-            if error < self.tol:
-                break
-            
             # 各分布の更新
             self.topic_θ = θ
             self.word_Φ  = Φ
-        
-        # 各分布の更新
-        self.topic_θ = θ
-        self.word_Φ  = Φ
+            
+            # 終了条件
+            if error < self.tol:
+                break
 
         return True
     
@@ -584,10 +572,10 @@ class LDA_In_VB:
                     q_dn   = q_dn / np.sum(q_dn)
                     
                     # トピック分布のハイパーパラメータの計算
-                    θ_new[idx_doc, :] += θ_new[idx_doc, :] + q_dn
+                    θ_new[idx_doc, :] = θ_new[idx_doc, :] + q_dn
                 
                     # 単語分布のハイパーパラメータの計算
-                    Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] += Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + q_dn
+                    Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] = Φ_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + q_dn
             
             # デバッグ出力
             error = np.sum(np.square(self.topic_θ_αk - θ_new)) + np.sum(np.square(self.word_Φ_βv - Φ_new))
@@ -596,17 +584,13 @@ class LDA_In_VB:
                 print(f"誤差：{error}")
                 print()
             
-            # 終了条件
-            if error < self.tol:
-                break
-            
             # 各分布の更新
             self.topic_θ_αk = θ_new
             self.word_Φ_βv  = Φ_new
-        
-        # 各分布の更新
-        self.topic_θ_αk = θ_new
-        self.word_Φ_βv  = Φ_new
+            
+            # 終了条件
+            if error < self.tol:
+                break
 
         return True
     
