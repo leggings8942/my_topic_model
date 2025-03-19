@@ -56,6 +56,104 @@ def create_stop_word(pd_text:pd.DataFrame, colname:str, stop_word:list[str], thr
     custom_list = stop_word + [key for key, val in word_count.items() if val < threshold]
     stop_word   = frozenset(custom_list)
     return stop_word
+
+
+class Update_Adam:
+    def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999):
+        self.alpha   = alpha
+        self.beta1   = beta1
+        self.beta2   = beta2
+        self.time    = 0
+        self.beta1_t = 1
+        self.beta2_t = 1
+        self.m = np.array([])
+        self.v = np.array([])
+
+    def update(self, grads):
+        if self.time == 0:
+            self.m = np.zeros(grads.shape)
+            self.v = np.zeros(grads.shape)
+        
+        ε = 1e-32
+        self.time   += 1
+        self.beta1_t *= self.beta1
+        self.beta2_t *= self.beta2
+
+        self.m = self.beta1 * self.m + (1 - self.beta1) * grads
+        self.v = self.beta2 * self.v + (1 - self.beta2) * (grads ** 2)
+        
+        m_hat = self.m / (1 - self.beta1_t)
+        v_hat = self.v / (1 - self.beta2_t)
+        
+        output = self.alpha * m_hat / np.sqrt(v_hat + ε)
+        return output
+
+
+def soft_maximum(x, α):
+    sign = np.empty_like(x)
+    sign[x >= 0] =  1
+    sign[x <  0] = -1
+    return sign * (np.abs(x) + α)
+
+class Update_Rafael:
+    def __init__(self, alpha=0.01, beta=0.99, isSHC=False):
+        self.alpha  = alpha
+        self.beta   = beta
+        self.time   = 0
+        self.beta_t = 1
+        self.m = np.array([])
+        self.v = np.array([])
+        self.w = np.array([])
+        self.σ_coef = 0
+        self.isSHC = isSHC
+
+    def update(self, grads):
+        if self.time == 0:
+            self.m = np.zeros(grads.shape)
+            self.v = np.zeros(grads.shape)
+            self.w = np.zeros(grads.shape)
+            self.σ_coef = (1 + self.beta) / 2
+        
+        ε = 1e-32
+        self.time   += 1
+        self.beta_t *= self.beta
+
+        self.m = self.beta * self.m + (1 - self.beta) * grads
+        m_hat = self.m / (1 - self.beta_t)
+
+        self.v = self.beta * self.v + (1 - self.beta) * (grads ** 2)
+        self.w = self.beta * self.w + (1 - self.beta) * ((grads / soft_maximum(m_hat, ε) - 1) ** 2)
+        
+        if self.beta - self.beta_t > 0.1:
+            v_hat  = self.v * self.σ_coef / (self.beta - self.beta_t)
+            w_hat  = self.w * self.σ_coef / (self.beta - self.beta_t)
+            σ_com  = np.sqrt((v_hat + w_hat + ε) / 2)
+            # σ_hes  = np.sqrt(w_hat + ε)
+            
+            # self-healing canonicalization
+            R = 0
+            if self.isSHC:
+                def chebyshev(r):
+                    tmp1 = σ_com + r
+                    tmp2 = np.square(m_hat / tmp1)
+                    f    =     np.sum(tmp2,                   axis=0) - r
+                    df   = 2 * np.sum(tmp2 / tmp1,            axis=0) + 1
+                    ddf  = 6 * np.sum(tmp2 / np.square(tmp1), axis=0)
+                    newt = f / df
+                    return r + newt + ddf / (2 * df) * np.square(newt)
+                
+                r_min = np.sum(np.square(m_hat / σ_com), axis=0)
+                r_max = np.cbrt(np.sum(np.square(m_hat), axis=0))
+                R = np.maximum(np.minimum(r_max, r_min), 1)
+                R = chebyshev(R)
+                # R = chebyshev(R)     # option: 精度を求めるならチェビシェフ法を2回適用する
+                R = np.maximum(R, 1) # option: 収束速度は遅くなるが、安定性が向上する
+                
+            output = self.alpha * m_hat / (σ_com + R)
+        else:
+            output = self.alpha * np.sign(grads)
+        
+        return output
         
 
 class Mixture_Of_Unigram_Models_In_EM:
@@ -942,7 +1040,7 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         self.train_data  = train_data
         self.doc_num     = len(train_data)
         self.label_num   = len(train_labels.columns)
-        self.label       = train_labels.columns
+        self.label       = train_labels.columns.values
         self.stop_word   = stop_word
         self.label_max   = label_max_value
         self.tol         = tol
@@ -961,7 +1059,7 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         self.DLBL   = []
         DEL_IDX     = []
         for idx in range(0, self.doc_num):
-            doc    = train_data.iat[idx, 'text']
+            doc    = train_data.at[idx, 'text']
             tokens = tokenizer_obj.tokenize(doc, tokenize_mode)
             doc_w_count = 0
             for node in tokens:
@@ -991,8 +1089,11 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             if doc_w_count == 0:
                 DEL_IDX.append(idx)
             else:
-                tmp = [train_data.iat[idx, lbl] for lbl in self.label]
+                tmp = [train_data.at[idx, lbl] for lbl in self.label]
                 self.DLBL.append(tmp)
+        
+        # numpy配列への変換
+        self.DLBL = np.array(self.DLBL)
         
         # 空の文書を削除
         self.train_data = train_data.drop(train_data.index[DEL_IDX]).reset_index(drop=True)
@@ -1023,15 +1124,14 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         self.Φ1 = self.random.random(size=(self.label_num, self.vocab_num))
         self.Ψ  = self.random.random(size=(self.topic_num, self.label_num))
         self.θ  = self.random.random(size=(self.doc_num,   self.topic_num))
-        self.Y  = self.random.random(size=(self.doc_num, max(self.doc_w_num), self.topic_num))
-        self.X  = self.random.random(size=(self.doc_num, max(self.doc_w_num), self.label_num))
+        self.Y  = self.random.random(size=(self.doc_num, max(self.doc_v_num), self.topic_num))
+        self.X  = self.random.random(size=(self.doc_num, max(self.doc_v_num), self.label_num))
         self.Z  = self.random.random(size=(self.doc_num, max(self.doc_w_num), self.label_num))
         self.R  = self.random.random(size=(self.doc_num, self.vocab_num))
         
         # 離散分布の正規化
-        self.Y = self.Y / np.sum(self.Y)
-        self.Z = self.Z / np.sum(self.Z)
-        self.R = self.R / (self.doc_num * self.vocab_num)
+        self.Y = self.Y / np.sum(self.Y, axis=2, keepdims=True)
+        self.Z = self.Z / np.sum(self.Z, axis=2, keepdims=True)
     
     def fit(self) -> bool:
         # 学習開始
@@ -1040,12 +1140,14 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             Λ_new  = np.zeros_like(self.Λ)
             Φ0_new = np.zeros_like(self.Φ0) + self.word_Φ_β
             Φ1_new = np.zeros_like(self.Φ1) + self.word_Φ_β
-            Ψ_new  = np.zeros_like(self.Ψ)
-            θ_new  = np.zeros_like(self.θ)
             Y_new  = np.zeros_like(self.Y)
             X_new  = np.zeros_like(self.X)
             Z_new  = np.zeros_like(self.Z)
             R_new  = np.zeros_like(self.R)
+            
+            ############
+            # 変分推定部
+            ############
             
             # q(Λ) ∝ Beta((Σ_d Σ_v q_dv + η[0] - 1) + 1, (Σ_d Σ_v η[1] - q_dv) + 1)  q_dv 〜 q(R)
             Λ_new[0] = np.sum([ self.R[d, self.W2I[self.DI2W[d][doc_idx]]] + self.relat_R_η - 1 for d in range(0, self.doc_num) for doc_idx in range(0, self.doc_v_num[d])]) + 1
@@ -1053,16 +1155,22 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             
             # 文書dごとにループ
             for idx_doc in range(0, self.doc_num):
-                # q(R=1) ∝ exp(digamma(q_a) - digamma(q_a + q_b)) exp(Σ_n:(v=W_dn) Σ_l q_dnl (digamma(q_lv) - digamma(Σ_v q_lv)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ)
-                # q(R=0) ∝ exp(digamma(q_b) - digamma(q_a + q_b)) exp(Σ_n:(v=W_dn) (digamma(q_0v) - digamma(Σ_v q_0v)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_0v 〜 q(Φ0)
+                # 語彙ごとにループ
                 for word in self.DW2I[idx_doc]:
+                    # q(R=1) ∝ exp(digamma(q_a) - digamma(q_a + q_b)) exp(Σ_n:(v=W_dn) Σ_l q_dnl (digamma(q_lv) - digamma(Σ_v q_lv)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ)
+                    # q(R=0) ∝ exp(digamma(q_b) - digamma(q_a + q_b)) exp(Σ_n:(v=W_dn) (digamma(q_0v) - digamma(Σ_v q_0v)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_0v 〜 q(Φ0)
                     q_1Λ  = digamma(Λ_new[0]) - digamma(Λ_new[0] + Λ_new[1])
                     q_1ZΦ = np.sum([self.Z[idx_doc, n, l] * (digamma(self.Φ1[l, self.W2I[word]]) - digamma(np.sum(self.Φ1, axis=1))) for n in self.DW2I[idx_doc][word] for l in range(0, self.label_num)])
                     
                     q_0Λ  = digamma(Λ_new[1]) - digamma(Λ_new[0] + Λ_new[1])
                     q_0ZΦ = np.sum((digamma(self.Φ0[0, self.W2I[word]]) - digamma(np.sum(self.Φ0, axis=1))) * len(self.DW2I[idx_doc][word]))
                     
-                    R_new[idx_doc, self.W2I[word]] = np.exp(q_1Λ + q_1ZΦ) / (np.exp(q_1Λ + q_1ZΦ) + np.exp(q_0Λ + q_0ZΦ))
+                    # R_new[idx_doc, self.W2I[word]] = np.exp(q_1Λ + q_1ZΦ) / (np.exp(q_1Λ + q_1ZΦ) + np.exp(q_0Λ + q_0ZΦ))
+                    
+                    # softmax関数を計算する時のテクニック
+                    tmp_R1, tmp_R0 = q_1Λ + q_1ZΦ, q_0Λ + q_0ZΦ
+                    tmp_R1, tmp_R0 = tmp_R1 - np.maximum(tmp_R1, tmp_R0), tmp_R0 - np.maximum(tmp_R1, tmp_R0)
+                    R_new[idx_doc, self.W2I[word]] = np.exp(tmp_R1) / (np.exp(tmp_R1) + np.exp(tmp_R0))
                 
                 # 感情サンプルごとにループ
                 # 感情サンプル数は文書dごとの語彙数と等しいとする
@@ -1073,103 +1181,154 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                         q_X = digamma(self.X[idx_doc, idx_doc_s, :]) - digamma(np.sum(self.X[idx_doc, idx_doc_s, :]))
                         q_θ = digamma(self.θ[idx_doc, idx_doc_k]) - digamma(np.sum(self.θ[idx_doc, :]))
                         
-                        Y_new[idx_doc, idx_doc_s, idx_doc_k] = np.exp(np.sum(q_X * q_Ψ) + q_θ)
+                        # Y_new[idx_doc, idx_doc_s, idx_doc_k] = np.exp(np.sum(q_X * q_Ψ) + q_θ)
+                        Y_new[idx_doc, idx_doc_s, idx_doc_k] = np.sum(q_X * q_Ψ) + q_θ
+                    
+                    # softmax関数を計算する時のテクニック
+                    Y_new[idx_doc, idx_doc_s, :] = Y_new[idx_doc, idx_doc_s, :] - np.max(Y_new[idx_doc, idx_doc_s, :])
+                    Y_new[idx_doc, idx_doc_s, :] = np.exp(Y_new[idx_doc, idx_doc_s, :])
                     Y_new[idx_doc, idx_doc_s, :] = Y_new[idx_doc, idx_doc_s, :] / np.sum(Y_new[idx_doc, idx_doc_s, :])
-                    
-                    
-                    # q(Ψ) ∝ exp(Σ_k Σ_l Σ_d Σ_m q_dmk ψ_kl (digamma(q_dml) - digamma(Σ_l q_dml))) exp(Σ_k Σ_l Σ_d (q_dk / (Σ_k q_dk)) ψ_kl logν_dl) exp(Σ_k Σ_l logψ_kl^(γ - 1))  q_dmk 〜 q(Y)  q_dml 〜 q(X)  q_dk 〜 q(θ)
-                    # ブラックボックス変分推定 対象関数
-                    # δF / δq_kl = Σ_d Σ_m q_dmk (1 - q_kl / (Σ_l q_kl)) / (Σ_l q_kl) (digamma(q_dml) - digamma(Σ_l q_dml)) - Σ_(l'≠l) q_dmk (q_kl' / (Σ_l q_kl) ** 2) (digamma(q_dml') - digamma(Σ_l q_dml'))
-                                # + Σ_d q_dk / (Σ_k q_dk) logν_dl (1 - q_kl / (Σ_l q_kl)) / (Σ_l q_kl) - Σ_(l\'≠l) q_dk / (Σ_k q_dk) logν_dl' (q_kl' / (Σ_l q_kl) ** 2)
-                                # + (γ - q_kl) (polygamma(1, q_kl) - polygamma(1, Σ_l q_kl)) - (digamma(q_kl) - digamma(Σ_l q_kl))
-                                #   q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dml 〜 q(X)  q_kl 〜 q(Ψ)
-                    # サイズ : 感情トピック数Κ × 単語トピック数L
-                    # 形状  : ディリクレ分布
-                    # 連続確率分布
-                    for idx in range(0, 500):
-                        q_xy = np.zeros(size=(self.topic_num, self.label_num))
-                        q_θ  = np.zeros(size=(self.topic_num, self.label_num))
-                        q_p  = np.zeros(size=(self.topic_num, self.label_num))
-                        for k in range(0, self.topic_num):
-                            for l in range(0, self.label_num):
-                                for d in range(0, self.doc_num):
-                                    for m in range(0, self.doc_v_num[d]):
-                                        q_xy[k, l] += self.Y[d, m, k] * (digamma(self.X[d, m, l]) - digamma(np.sum(self.X[d, m, :])))
-                                    
-                                    q_θ[k, l] += self.θ[d, k] / np.sum(self.θ[d, :]) * np.log(self.LBL[d, l])
-                                
-                                q_p[k, l] = (self.senti_Ψ_γ - self.Ψ[k, l]) * (polygamma(1, self.Ψ[k, l]) - polygamma(1, np.sum(self.Ψ[k, :]))) - (digamma(self.Ψ[k, l]) - digamma(np.sum(self.Ψ[k, :])))
-                        q_diff = q_xy + q_θ
-                        q_diff = q_diff * (1 - self.Ψ / np.sum(self.Ψ, axis=1)) / np.sum(self.Ψ, axis=1) - q_diff * self.Ψ / (np.sum(self.Ψ, axis=1) ** 2) + np.sum(q_diff * self.Ψ / (np.sum(self.Ψ, axis=1) ** 2), axis=1)
-                        q_diff = q_diff + q_p
-                        self.Ψ += 0.001 * q_diff
-                                
-
-                    # q(θ) ∝ exp(Σ_d Σ_k Σ_l K θ_dk (q_kl / (Σ_l q_kl)) logν_dl) exp(Σ_d Σ_k logθ_dk^{Σ_m q_dmk + α - 1})  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
-                    # ブラックボックス変分推定 対象関数
-                    # δlogF / δq_dk = Σ_l K (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk) q_kl / (Σ_l q_kl) logν_dl - Σ_l Σ_k\'≠k K q_dk' / ((Σ_k q_dk) ** 2) q_k'l / (Σ_l q_k'l) logν_dl
-                                #    + (Σ_m q_dmk + α - q_dk) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk)) - (digamma(q_dk) - digamma(Σ_k q_dk))
-                                    #  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
-                    # サイズ : 文書数D × 感情トピック数Κ
-                    # 形状  : ディリクレ分布
-                    # 連続確率分布
-                    for idx in range(0, 500):
-                        q_ψ = np.zeros(size=(self.doc_num, self.topic_num))
-                        q_y = np.zeros(size=(self.doc_num, self.topic_num))
-                        for d in range(0, self.doc_num):
-                            for k in range(0, self.topic_num):
-                                for l in range(0, self.label_num):
-                                    q_ψ[d, k] += self.topic_num * self.Ψ[k, l] / np.sum(self.Ψ[k, :]) * np.log(self.LBL[d, l])
-                                
-                            q_y[d, k] = (np.sum(self.Y[d, :, k]) + self.topic_θ_α - self.θ[d, k]) * (polygamma(1, self.θ[d, k]) - polygamma(1, np.sum(self.θ[d, :]))) - (digamma(self.θ[d, k]) - digamma(np.sum(self.θ[d, :])))
-                        q_diff = q_ψ
-                        q_diff = q_diff * (1 - self.θ / np.sum(self.θ, axis=1)) / np.sum(self.θ, axis=1) - q_diff * self.θ / (np.sum(self.θ, axis=1) ** 2) + np.sum(q_diff * self.θ / (np.sum(self.θ, axis=1) ** 2), axis=1)
-                        q_diff = q_diff + q_y
-                        self.θ += 0.001 * q_diff
-                    
+                
                     # q(X) ∝ Dirichlet(X_dm | Σ_n q_dnl + Σ_k q_dmk {q_kl / Σ_l q_kl - 1} + 1)  q_dnl 〜 q(Z)  q_dmk 〜 q(Y)  q_kl 〜 q(Ψ)
                     q_Z  = np.sum(self.Z[idx_doc, :, :], axis=0)
-                    q_YΨ = np.sum([Y_new[idx_doc, idx_doc_s, k] * (Ψ_new[k, :] / np.sum(Ψ_new[k, :]) - 1) for k in range(0, self.topic_num)], axis=0)
-                    X_new[idx_doc, idx_doc_s, :] = q_Z + q_YΨ
-                    X_new[idx_doc, idx_doc_s, :] = X_new[idx_doc, idx_doc_s, :] / np.sum(X_new[idx_doc, idx_doc_s, :])
+                    q_YΨ = np.sum([Y_new[idx_doc, idx_doc_s, k] * (self.Ψ[k, :] / np.sum(self.Ψ[k, :]) - 1) for k in range(0, self.topic_num)], axis=0)
+                    X_new[idx_doc, idx_doc_s, :] = q_Z + q_YΨ + 1
                 
                 # 単語ごとにループ
                 for idx_doc_w in range(0, self.doc_w_num[idx_doc]):
                     # q(Z) ∝ exp(Σ_m digamma(q_dml) - digamma(Σ_l q_dml)) exp(q_d(w_dn) (digamma(q_l(w_dn)) - digamma(Σ_v q_lv)) + (1 - q_d(w_dn)) (digamma(q_0(w_dn)) - digamma(Σ_v q_0v)))  q_dml 〜 q(X)  q_dv 〜 q(R)  q_lv 〜 q(Φ)
                     # サイズ : 文書数D × 単語数N_d × 単語トピック数L
-                    q_X  = np.sum([digamma(self.X[idx_doc, m, :]) - digamma(np.sum(self.X[idx_doc, m, :])) for m in range(0, self.doc_v_num[idx_doc])], axis=0)
-                    q_1Φ = R_new[idx_doc, self.W2I[self.DI2W[idx_doc_w]]]       * digamma(self.Φ1[:, self.W2I[self.DI2W[idx_doc_w]]]) - digamma(np.sum(self.Φ1, axis=1))
-                    q_0Φ = (1 - R_new[idx_doc, self.W2I[self.DI2W[idx_doc_w]]]) * digamma(self.Φ0[0, self.W2I[self.DI2W[idx_doc_w]]]) - digamma(np.sum(self.Φ0, axis=1))
-                    Z_new[idx_doc, idx_doc_w, :] = np.exp(q_X + q_1Φ + q_0Φ)
+                    q_X  = np.sum([digamma(X_new[idx_doc, m, :]) - digamma(np.sum(X_new[idx_doc, m, :])) for m in range(0, self.doc_v_num[idx_doc])], axis=0)
+                    q_1Φ = R_new[idx_doc, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]       * digamma(self.Φ1[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) - digamma(np.sum(self.Φ1, axis=1))
+                    q_0Φ = (1 - R_new[idx_doc, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) * digamma(self.Φ0[0, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) - digamma(np.sum(self.Φ0, axis=1))
+                    # Z_new[idx_doc, idx_doc_w, :] = np.exp(q_X + q_1Φ + q_0Φ)
+                    # Z_new[idx_doc, idx_doc_w, :] = Z_new[idx_doc, idx_doc_w, :] / np.sum(Z_new[idx_doc, idx_doc_w, :])
+                    
+                    # softmax関数を計算する時のテクニック
+                    Z_new[idx_doc, idx_doc_w, :] = q_X + q_1Φ + q_0Φ
+                    Z_new[idx_doc, idx_doc_w, :] = Z_new[idx_doc, idx_doc_w, :] - np.max(Z_new[idx_doc, idx_doc_w, :])
+                    Z_new[idx_doc, idx_doc_w, :] = np.exp(Z_new[idx_doc, idx_doc_w, :])
                     Z_new[idx_doc, idx_doc_w, :] = Z_new[idx_doc, idx_doc_w, :] / np.sum(Z_new[idx_doc, idx_doc_w, :])
                     
                     
                     # q(Φ) ∝ Dirichlet_0((Σ_d Σ_n:(v=W_dn) (1 - q_dv)) + β)  q_dv 〜 q(R)
                     #        Dirichlet_l((Σ_d Σ_n:(v=W_dn) q_dv q_dnl) + β)  q_dv 〜 q(R)  q_dnl 〜 q(Z)
-                    Φ0_new[0, self.W2I[self.DI2W[idx_doc_w]]] += 1 - R_new[idx_doc, self.W2I[self.DI2W[idx_doc_w]]]
-                    Φ1_new[:, self.W2I[self.DI2W[idx_doc_w]]] += R_new[idx_doc, self.W2I[self.DI2W[idx_doc_w]]]     * Z_new[idx_doc, idx_doc_w, :]
+                    Φ0_new[0, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] += 1 - R_new[idx_doc, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]
+                    Φ1_new[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] += R_new[idx_doc, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]     * Z_new[idx_doc, idx_doc_w, :]
+            
+            ########################
+            # ブラックボックス変分推定部
+            ########################
+            
+            # q(Ψ) ∝ exp(Σ_k Σ_l Σ_d Σ_m q_dmk ψ_kl (digamma(q_dml) - digamma(Σ_l q_dml))) exp(Σ_k Σ_l Σ_d (q_dk / (Σ_k q_dk)) ψ_kl logν_dl) exp(Σ_k Σ_l logψ_kl^(γ - 1))  q_dmk 〜 q(Y)  q_dml 〜 q(X)  q_dk 〜 q(θ)
+            # ブラックボックス変分推定 対象関数
+            # δF / δq_kl = Σ_d Σ_m q_dmk (1 - q_kl / (Σ_l q_kl)) / (Σ_l q_kl) (digamma(q_dml) - digamma(Σ_l q_dml)) - Σ_(l'≠l) q_dmk (q_kl' / (Σ_l q_kl) ** 2) (digamma(q_dml') - digamma(Σ_l q_dml'))
+                        # + Σ_d q_dk / (Σ_k q_dk) logν_dl (1 - q_kl / (Σ_l q_kl)) / (Σ_l q_kl) - Σ_(l\'≠l) q_dk / (Σ_k q_dk) logν_dl' (q_kl' / (Σ_l q_kl) ** 2)
+                        # + (γ - q_kl) (polygamma(1, q_kl) - polygamma(1, Σ_l q_kl)) - (digamma(q_kl) - digamma(Σ_l q_kl))
+                        #   q_dk 〜 q(θ)  q_dmk 〜 q(Y)  q_dml 〜 q(X)  q_kl 〜 q(Ψ)
+            # サイズ : 感情トピック数Κ × 単語トピック数L
+            # 形状  : ディリクレ分布
+            # 連続確率分布
+            
+            # q(θ) ∝ exp(Σ_d Σ_k Σ_l K θ_dk (q_kl / (Σ_l q_kl)) logν_dl) exp(Σ_d Σ_k logθ_dk^{Σ_m q_dmk + α - 1})  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
+            # ブラックボックス変分推定 対象関数
+            # δlogF / δq_dk = Σ_l K (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk) q_kl / (Σ_l q_kl) logν_dl - Σ_l Σ_k\'≠k K q_dk' / ((Σ_k q_dk) ** 2) q_k'l / (Σ_l q_k'l) logν_dl
+                        #    + (Σ_m q_dmk + α - q_dk) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk)) - (digamma(q_dk) - digamma(Σ_k q_dk))
+                            #  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
+            # サイズ : 文書数D × 感情トピック数Κ
+            # 形状  : ディリクレ分布
+            # 連続確率分布
+            
+            prev_diff   = 0
+            optimizer_ψ = Update_Rafael(0.001, isSHC=True)
+            optimizer_θ = Update_Rafael(0.001, isSHC=True)
+            for idx2 in range(0, self.max_iterate):
+                diff_xy = np.zeros(shape=(self.topic_num, self.label_num))
+                diff_ψ  = np.zeros(shape=(self.doc_num,   self.topic_num))
+                diff_θ  = np.zeros(shape=(self.topic_num, self.label_num))
+                q_Ψ     = np.square(self.Ψ) / 2
+                q_θ     = np.square(self.θ) / 2
+                
+                # q(Ψ)の微分計算処理
+                for d in range(0, self.doc_num):
+                    for m in range(0, self.doc_v_num[d]):
+                        diff_xy += Y_new[d, m, :].reshape([self.topic_num, 1]) * (digamma(X_new[d, m, :].reshape([1, self.label_num])) - digamma(np.sum(X_new[d, m, :])))
+                    
+                    diff_θ += q_θ[d, :].reshape([self.topic_num, 1]) / np.sum(q_θ[d, :]) * np.log(self.DLBL[d, :].reshape([1, self.label_num]) + 1e-32)
+                                
+                diff_p = (self.senti_Ψ_γ - q_Ψ) * (polygamma(1, q_Ψ) - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True))) - (digamma(q_Ψ) - digamma(np.sum(q_Ψ, axis=1, keepdims=True)))
+                
+                # q(θ)の微分計算処理
+                for l in range(0, self.label_num):
+                    ratio   = q_Ψ[:, l] / np.sum(q_Ψ, axis=1)
+                    diff_ψ += self.topic_num * ratio.reshape([1, self.topic_num]) * np.log(self.DLBL[:, l].reshape([self.doc_num, 1]) + 1e-32)
+                                
+                diff_y = (np.sum(Y_new, axis=1) + self.topic_θ_α - q_θ) * (polygamma(1, q_θ) - polygamma(1, np.sum(q_θ, axis=1, keepdims=True))) - (digamma(q_θ) - digamma(np.sum(q_θ, axis=1, keepdims=True)))
+                
+                ψ_diff = diff_xy + diff_θ
+                ψ_diff = ψ_diff * (1 - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)) / np.sum(q_Ψ, axis=1, keepdims=True) - np.sum(ψ_diff * q_Ψ / (np.sum(q_Ψ, axis=1, keepdims=True) ** 2), axis=1, keepdims=True) + ψ_diff * q_Ψ / (np.sum(q_Ψ, axis=1, keepdims=True) ** 2)
+                ψ_diff = ψ_diff + diff_p
+                ψ_diff = ψ_diff * self.Ψ
+                Δdiff  = optimizer_ψ.update(ψ_diff)
+                self.Ψ = self.Ψ + Δdiff
+                
+                θ_diff = diff_ψ
+                θ_diff = θ_diff * (1 - q_θ / np.sum(q_θ, axis=1, keepdims=True)) / np.sum(q_θ, axis=1, keepdims=True) - np.sum(θ_diff * q_θ / (np.sum(q_θ, axis=1, keepdims=True) ** 2), axis=1, keepdims=True) + θ_diff * q_θ / (np.sum(q_θ, axis=1, keepdims=True) ** 2)
+                θ_diff = θ_diff + diff_y
+                θ_diff = θ_diff * self.θ
+                Δdiff  = optimizer_θ.update(θ_diff)
+                self.θ = self.θ + Δdiff
+                
+                ψ_sum_diff = np.sum(np.abs(ψ_diff))
+                ψ_per_diff = np.sum(np.abs(ψ_diff)) / (ψ_diff.size)
+                θ_sum_diff = np.sum(np.abs(θ_diff))
+                θ_per_diff = np.sum(np.abs(θ_diff)) / (θ_diff.size)
+                sum_diff = ψ_sum_diff + θ_sum_diff
+                per_diff = ψ_per_diff + θ_per_diff
+                if idx2 % 100 == 0:
+                    line = f'idx:{idx} BB変分部: idx2:{idx2} '
+                    print(line          + f' 総微分量：{sum_diff}')
+                    print(' '*len(line) + f' 要素あたりの微分量：{per_diff}')
+                    print(' '*len(line) + f' q(Ψ)： 総微分量：{ψ_sum_diff}')
+                    print(' '*len(line) + f' q(Ψ)： 要素あたりの微分量：{ψ_per_diff}')
+                    print(' '*len(line) + f' q(θ)： 総微分量：{θ_sum_diff}')
+                    print(' '*len(line) + f' q(θ)： 要素あたりの微分量：{θ_per_diff}')
+                    print(' '*len(line) + f' 微分量の変化：{np.abs(per_diff - prev_diff)}')
+                
+                if np.abs(per_diff - prev_diff) < self.tol:
+                    break
+                else:
+                    prev_diff = per_diff
+            
+            # 変数変換
+            self.Ψ = np.square(self.Ψ) / 2
+            self.θ = np.square(self.θ) / 2
             
             # デバッグ出力
             error_Λ = np.sum(np.abs(self.Λ - Λ_new))
             error_Φ = np.sum(np.abs(self.Φ0 - Φ0_new)) + np.sum(np.abs(self.Φ1 - Φ1_new))
-            error_Ψ = np.sum(np.abs(self.Ψ - Ψ_new))
-            error_θ = np.sum(np.abs(self.θ - θ_new))
             error_Y = np.sum(np.abs(self.Y - Y_new))
             error_X = np.sum(np.abs(self.X - X_new))
             error_Z = np.sum(np.abs(self.Z - Z_new))
             error_R = np.sum(np.abs(self.R - R_new))
-            error = error_Λ + error_Φ + error_Ψ + error_θ + error_Y + error_X + error_Z + error_R
-            if idx % 100 == 0:
-                print(f"学習回数：{idx}")
-                print(f"誤差：{error}")
+            error = error_Λ + error_Φ + error_Y + error_X + error_Z + error_R
+            if idx % 1 == 0:
+                print(f'学習回数：{idx}')
+                print(f'総誤差量：{error}')
+                line = '各種 修正量：'
+                print(line          + f' 関係性分布Λ：', error_Λ)
+                print(' '*len(line) + f' 単語分布Φ：', error_Φ)
+                print(' '*len(line) + f' トピックラベル分布Y：', error_Y)
+                print(' '*len(line) + f' 感情ラベル分布X：', error_X)
+                print(' '*len(line) + f' 感情トピック分布Z：', error_Z)
+                print(' '*len(line) + f' 関係性トピック分布R：', error_R)
+                
                 print()
             
             # 各分布の更新
             self.Λ = Λ_new
             self.Φ0 = Φ0_new
             self.Φ1 = Φ1_new
-            self.Ψ = Ψ_new
-            self.θ = θ_new
             self.Y = Y_new
             self.X = X_new
             self.Z = Z_new
