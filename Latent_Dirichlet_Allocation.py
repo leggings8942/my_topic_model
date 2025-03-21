@@ -963,8 +963,8 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 # 形状  : ディリクレ分布
 # 連続確率分布
 
-# q(R=1) ∝ exp(digamma(q_a) - digamma(q_a + q_b)) exp(Σ_n:(v=W_dn) Σ_l q_dnl (digamma(q_lv) - digamma(Σ_v q_lv)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ)
-# q(R=0) ∝ exp(digamma(q_b) - digamma(q_a + q_b)) exp(Σ_n:(v=W_dn) (digamma(q_0v) - digamma(Σ_v q_0v)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_0v 〜 q(Φ0)
+# q(R=1) ∝ exp(Σ_n:(v=W_dn) Σ_l q_dnl (digamma(q_lv) + digamma(q_a) - digamma(Σ_v q_lv) - digamma(q_a + q_b)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ1)
+# q(R=0) ∝ exp(Σ_n:(v=W_dn) (digamma(q_0v) - digamma(Σ_v q_0v)) (digamma(q_b) - digamma(q_a + q_b)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_0v 〜 q(Φ0)
 # サイズ : 文書数D × 語彙数V
 # 形状  : 不明
 # 離散確率分布
