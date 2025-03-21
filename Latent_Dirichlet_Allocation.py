@@ -1005,7 +1005,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 
 
 class Harmonized_Sentiment_Topic_Model_In_VB:
-    def __init__(self, train_data:pd.DataFrame, train_labels:pd.DataFrame, stop_word:frozenset[str], label_max_value:float=4, tol:float=1e-6, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
+    def __init__(self, train_data:pd.DataFrame, train_labels:pd.DataFrame, stop_word:frozenset[str], label_max_value:float=4, tol:float=1e-6, minor_amount:float=1e-24, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
         
@@ -1132,6 +1132,9 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         # 離散分布の正規化
         self.Y = self.Y / np.sum(self.Y, axis=2, keepdims=True)
         self.Z = self.Z / np.sum(self.Z, axis=2, keepdims=True)
+        
+        # 許容微少量
+        self.minor_amount = minor_amount
     
     def fit(self) -> bool:
         # 学習開始
@@ -1159,11 +1162,11 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                 for word in self.DW2I[idx_doc]:
                     # q(R=1) ∝ exp(digamma(q_a) - digamma(q_a + q_b)) exp(Σ_n:(v=W_dn) Σ_l q_dnl (digamma(q_lv) - digamma(Σ_v q_lv)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_lv 〜 q(Φ)
                     # q(R=0) ∝ exp(digamma(q_b) - digamma(q_a + q_b)) exp(Σ_n:(v=W_dn) (digamma(q_0v) - digamma(Σ_v q_0v)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_0v 〜 q(Φ0)
-                    q_1Λ  = digamma(Λ_new[0]) - digamma(Λ_new[0] + Λ_new[1])
-                    q_1ZΦ = np.sum([self.Z[idx_doc, n, l] * (digamma(self.Φ1[l, self.W2I[word]]) - digamma(np.sum(self.Φ1, axis=1))) for n in self.DW2I[idx_doc][word] for l in range(0, self.label_num)])
+                    q_1Λ  = digamma(Λ_new[0] + self.minor_amount) - digamma(Λ_new[0] + Λ_new[1] + self.minor_amount)
+                    q_1ZΦ = np.sum([self.Z[idx_doc, n, l] * (digamma(self.Φ1[l, self.W2I[word]] + self.minor_amount) - digamma(np.sum(self.Φ1, axis=1) + self.minor_amount)) for n in self.DW2I[idx_doc][word] for l in range(0, self.label_num)])
                     
-                    q_0Λ  = digamma(Λ_new[1]) - digamma(Λ_new[0] + Λ_new[1])
-                    q_0ZΦ = np.sum((digamma(self.Φ0[0, self.W2I[word]]) - digamma(np.sum(self.Φ0, axis=1))) * len(self.DW2I[idx_doc][word]))
+                    q_0Λ  = digamma(Λ_new[1] + self.minor_amount) - digamma(Λ_new[0] + Λ_new[1] + self.minor_amount)
+                    q_0ZΦ = np.sum((digamma(self.Φ0[0, self.W2I[word]] + self.minor_amount) - digamma(np.sum(self.Φ0, axis=1) + self.minor_amount)) * len(self.DW2I[idx_doc][word]))
                     
                     # R_new[idx_doc, self.W2I[word]] = np.exp(q_1Λ + q_1ZΦ) / (np.exp(q_1Λ + q_1ZΦ) + np.exp(q_0Λ + q_0ZΦ))
                     
@@ -1178,8 +1181,8 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                     # q(Y) ∝ exp(digamma(q_dk) - digamma(Σ_k q_dk)) exp(Σ_l (q_kl / (Σ_l q_kl) - 1) (digamma(q_dml) - digamma(Σ_l q_dml)))  q_dk 〜 q(θ)  q_kl 〜 q(Ψ)  q_dml 〜 q(X)
                     for idx_doc_k in range(0, self.topic_num):
                         q_Ψ = self.Ψ[idx_doc_k, :] / np.sum(self.Ψ[idx_doc_k, :])
-                        q_X = digamma(self.X[idx_doc, idx_doc_s, :]) - digamma(np.sum(self.X[idx_doc, idx_doc_s, :]))
-                        q_θ = digamma(self.θ[idx_doc, idx_doc_k]) - digamma(np.sum(self.θ[idx_doc, :]))
+                        q_X = digamma(self.X[idx_doc, idx_doc_s, :] + self.minor_amount) - digamma(np.sum(self.X[idx_doc, idx_doc_s, :]) + self.minor_amount)
+                        q_θ = digamma(self.θ[idx_doc, idx_doc_k]    + self.minor_amount) - digamma(np.sum(self.θ[idx_doc, :])            + self.minor_amount)
                         
                         # Y_new[idx_doc, idx_doc_s, idx_doc_k] = np.exp(np.sum(q_X * q_Ψ) + q_θ)
                         Y_new[idx_doc, idx_doc_s, idx_doc_k] = np.sum(q_X * q_Ψ) + q_θ
@@ -1198,9 +1201,9 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                 for idx_doc_w in range(0, self.doc_w_num[idx_doc]):
                     # q(Z) ∝ exp(Σ_m digamma(q_dml) - digamma(Σ_l q_dml)) exp(q_d(w_dn) (digamma(q_l(w_dn)) - digamma(Σ_v q_lv)) + (1 - q_d(w_dn)) (digamma(q_0(w_dn)) - digamma(Σ_v q_0v)))  q_dml 〜 q(X)  q_dv 〜 q(R)  q_lv 〜 q(Φ)
                     # サイズ : 文書数D × 単語数N_d × 単語トピック数L
-                    q_X  = np.sum([digamma(X_new[idx_doc, m, :]) - digamma(np.sum(X_new[idx_doc, m, :])) for m in range(0, self.doc_v_num[idx_doc])], axis=0)
-                    q_1Φ = R_new[idx_doc, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]       * digamma(self.Φ1[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) - digamma(np.sum(self.Φ1, axis=1))
-                    q_0Φ = (1 - R_new[idx_doc, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) * digamma(self.Φ0[0, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) - digamma(np.sum(self.Φ0, axis=1))
+                    q_X  = np.sum([digamma(X_new[idx_doc, m, :] + self.minor_amount) - digamma(np.sum(X_new[idx_doc, m, :]) + self.minor_amount) for m in range(0, self.doc_v_num[idx_doc])], axis=0)
+                    q_1Φ = R_new[idx_doc, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]       * digamma(self.Φ1[:, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + self.minor_amount) - digamma(np.sum(self.Φ1, axis=1) + self.minor_amount)
+                    q_0Φ = (1 - R_new[idx_doc, self.W2I[self.DI2W[idx_doc][idx_doc_w]]]) * digamma(self.Φ0[0, self.W2I[self.DI2W[idx_doc][idx_doc_w]]] + self.minor_amount) - digamma(np.sum(self.Φ0, axis=1) + self.minor_amount)
                     # Z_new[idx_doc, idx_doc_w, :] = np.exp(q_X + q_1Φ + q_0Φ)
                     # Z_new[idx_doc, idx_doc_w, :] = Z_new[idx_doc, idx_doc_w, :] / np.sum(Z_new[idx_doc, idx_doc_w, :])
                     
@@ -1239,10 +1242,12 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             # 形状  : ディリクレ分布
             # 連続確率分布
             
+            self.Ψ = np.sqrt(2 * self.Ψ)
+            self.θ = np.sqrt(2 * self.θ)
             prev_diff   = 0
             optimizer_ψ = Update_Rafael(0.001, isSHC=True)
             optimizer_θ = Update_Rafael(0.001, isSHC=True)
-            for idx2 in range(0, self.max_iterate):
+            for idx2 in range(0, 500):
                 diff_xy = np.zeros(shape=(self.topic_num, self.label_num))
                 diff_ψ  = np.zeros(shape=(self.doc_num,   self.topic_num))
                 diff_θ  = np.zeros(shape=(self.topic_num, self.label_num))
@@ -1252,18 +1257,18 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                 # q(Ψ)の微分計算処理
                 for d in range(0, self.doc_num):
                     for m in range(0, self.doc_v_num[d]):
-                        diff_xy += Y_new[d, m, :].reshape([self.topic_num, 1]) * (digamma(X_new[d, m, :].reshape([1, self.label_num])) - digamma(np.sum(X_new[d, m, :])))
+                        diff_xy += Y_new[d, m, :].reshape([self.topic_num, 1]) * (digamma(X_new[d, m, :].reshape([1, self.label_num]) + self.minor_amount) - digamma(np.sum(X_new[d, m, :]) + self.minor_amount))
                     
-                    diff_θ += q_θ[d, :].reshape([self.topic_num, 1]) / np.sum(q_θ[d, :]) * np.log(self.DLBL[d, :].reshape([1, self.label_num]) + 1e-32)
+                    diff_θ += q_θ[d, :].reshape([self.topic_num, 1]) / np.sum(q_θ[d, :]) * np.log(self.DLBL[d, :].reshape([1, self.label_num]) + self.minor_amount)
                                 
-                diff_p = (self.senti_Ψ_γ - q_Ψ) * (polygamma(1, q_Ψ) - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True))) - (digamma(q_Ψ) - digamma(np.sum(q_Ψ, axis=1, keepdims=True)))
+                diff_p = (self.senti_Ψ_γ - q_Ψ) * (polygamma(1, q_Ψ + self.minor_amount) - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount)) - (digamma(q_Ψ + self.minor_amount) - digamma(np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount))
                 
                 # q(θ)の微分計算処理
                 for l in range(0, self.label_num):
                     ratio   = q_Ψ[:, l] / np.sum(q_Ψ, axis=1)
-                    diff_ψ += self.topic_num * ratio.reshape([1, self.topic_num]) * np.log(self.DLBL[:, l].reshape([self.doc_num, 1]) + 1e-32)
+                    diff_ψ += self.topic_num * ratio.reshape([1, self.topic_num]) * np.log(self.DLBL[:, l].reshape([self.doc_num, 1]) + self.minor_amount)
                                 
-                diff_y = (np.sum(Y_new, axis=1) + self.topic_θ_α - q_θ) * (polygamma(1, q_θ) - polygamma(1, np.sum(q_θ, axis=1, keepdims=True))) - (digamma(q_θ) - digamma(np.sum(q_θ, axis=1, keepdims=True)))
+                diff_y = (np.sum(Y_new, axis=1) + self.topic_θ_α - q_θ) * (polygamma(1, q_θ + self.minor_amount) - polygamma(1, np.sum(q_θ, axis=1, keepdims=True) + self.minor_amount)) - (digamma(q_θ + self.minor_amount) - digamma(np.sum(q_θ, axis=1, keepdims=True) + self.minor_amount))
                 
                 ψ_diff = diff_xy + diff_θ
                 ψ_diff = ψ_diff * (1 - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)) / np.sum(q_Ψ, axis=1, keepdims=True) - np.sum(ψ_diff * q_Ψ / (np.sum(q_Ψ, axis=1, keepdims=True) ** 2), axis=1, keepdims=True) + ψ_diff * q_Ψ / (np.sum(q_Ψ, axis=1, keepdims=True) ** 2)
@@ -1295,14 +1300,14 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                     print(' '*len(line) + f' q(θ)： 要素あたりの微分量：{θ_per_diff}')
                     print(' '*len(line) + f' 微分量の変化：{np.abs(per_diff - prev_diff)}')
                 
-                if np.abs(per_diff - prev_diff) < self.tol:
+                if np.abs(per_diff - prev_diff) < 0.1:
                     break
                 else:
                     prev_diff = per_diff
             
             # 変数変換
-            self.Ψ = np.square(self.Ψ) / 2
-            self.θ = np.square(self.θ) / 2
+            self.Ψ = np.maximum(np.square(self.Ψ) / 2, self.minor_amount)
+            self.θ = np.maximum(np.square(self.θ) / 2, self.minor_amount)
             
             # デバッグ出力
             error_Λ = np.sum(np.abs(self.Λ - Λ_new))
@@ -1325,14 +1330,81 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                 
                 print()
             
+            finite_flg = True
+            if   np.all(np.isfinite(Λ_new)) == False:
+                finite_flg = False
+                print("Value Error:: 関係性分布Λの数値が壊れています")
+                print("is zero ::", np.any(Λ_new == 0))
+                print("is NaN ::", np.any(np.isnan(Λ_new)))
+                print("is positive Inf ::", np.any(np.isposinf(Λ_new)))
+                print("is negative Inf ::", np.any(np.isneginf(Λ_new)))
+            if np.all(np.isfinite(Φ0_new)) == False:
+                finite_flg = False
+                print("Value Error:: 単語分布Φ0の数値が壊れています")
+                print("is zero ::", np.any(Φ0_new == 0))
+                print("is NaN ::", np.any(np.isnan(Φ0_new)))
+                print("is positive Inf ::", np.any(np.isposinf(Φ0_new)))
+                print("is negative Inf ::", np.any(np.isneginf(Φ0_new)))
+            if np.all(np.isfinite(Φ1_new)) == False:
+                finite_flg = False
+                print("Value Error:: 単語分布Φ1の数値が壊れています")
+                print("is zero ::", np.any(Φ1_new == 0))
+                print("is NaN ::", np.any(np.isnan(Φ1_new)))
+                print("is positive Inf ::", np.any(np.isposinf(Φ1_new)))
+                print("is negative Inf ::", np.any(np.isneginf(Φ1_new)))
+            if np.all(np.isfinite(Y_new)) == False:
+                finite_flg = False
+                print("Value Error:: トピックラベル分布Yの数値が壊れています")
+                print("is zero ::", np.any(Y_new == 0))
+                print("is NaN ::", np.any(np.isnan(Y_new)))
+                print("is positive Inf ::", np.any(np.isposinf(Y_new)))
+                print("is negative Inf ::", np.any(np.isneginf(Y_new)))
+            if np.all(np.isfinite(X_new)) == False:
+                finite_flg = False
+                print("Value Error:: 感情ラベル分布Xの数値が壊れています")
+                print("is zero ::", np.any(X_new == 0))
+                print("is NaN ::", np.any(np.isnan(X_new)))
+                print("is positive Inf ::", np.any(np.isposinf(X_new)))
+                print("is negative Inf ::", np.any(np.isneginf(X_new)))
+            if np.all(np.isfinite(Z_new)) == False:
+                finite_flg = False
+                print("Value Error:: 感情トピック分布Zの数値が壊れています")
+                print("is zero ::", np.any(Z_new == 0))
+                print("is NaN ::", np.any(np.isnan(Z_new)))
+                print("is positive Inf ::", np.any(np.isposinf(Z_new)))
+                print("is negative Inf ::", np.any(np.isneginf(Z_new)))
+            if np.all(np.isfinite(R_new)) == False:
+                finite_flg = False
+                print("Value Error:: 関係性トピック分布Rの数値が壊れています")
+                print("is zero ::", np.any(R_new == 0))
+                print("is NaN ::", np.any(np.isnan(R_new)))
+                print("is positive Inf ::", np.any(np.isposinf(R_new)))
+                print("is negative Inf ::", np.any(np.isneginf(R_new)))
+
+            
+            if finite_flg == False:
+                print(f'学習回数：{idx}')
+                print(f'総誤差量：{error}')
+                line = '各種 修正量：'
+                print(line          + f' 関係性分布Λ：', error_Λ)
+                print(' '*len(line) + f' 単語分布Φ：', error_Φ)
+                print(' '*len(line) + f' トピックラベル分布Y：', error_Y)
+                print(' '*len(line) + f' 感情ラベル分布X：', error_X)
+                print(' '*len(line) + f' 感情トピック分布Z：', error_Z)
+                print(' '*len(line) + f' 関係性トピック分布R：', error_R)
+                
+                print()
+                raise ValueError()
+            
+            
             # 各分布の更新
-            self.Λ = Λ_new
-            self.Φ0 = Φ0_new
-            self.Φ1 = Φ1_new
-            self.Y = Y_new
-            self.X = X_new
-            self.Z = Z_new
-            self.R = R_new
+            self.Λ  = np.maximum(Λ_new,  self.minor_amount)
+            self.Φ0 = np.maximum(Φ0_new, self.minor_amount)
+            self.Φ1 = np.maximum(Φ1_new, self.minor_amount)
+            self.Y  = np.maximum(Y_new,  self.minor_amount)
+            self.X  = np.maximum(X_new,  self.minor_amount)
+            self.Z  = np.maximum(Z_new,  self.minor_amount)
+            self.R  = np.maximum(R_new,  self.minor_amount)
             
             # 終了条件
             if error < self.tol:
