@@ -866,7 +866,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 #       (b) For 感情サンプル m = 1, ... M_d
 #               i.  トピックラベル y_dm 〜 Categorical(θ_d)
 #               ii. 感情分布 x_dm 〜 Dirichlet(ψ_(y_dm))
-#       (c) 文書感情尤度 ν_d 〜 Nagino(Σ_k θ_dk ψ_k, C)
+#       (c) 文書感情尤度 ν_d 〜 Nagino(Σ_k θ_dk ψ_kl, C)
 #       (d) 文書感情分布 x_d = x_d1 * x_d2 * ... * x_d(M_d)
 #       (e) For 各単語 n = 1, ... N_d
 #               i.   感情トピック z_dn 〜 Categorical(x_d)
@@ -953,7 +953,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 #         = E_q(X, θ)q(Y)[logp(ν | θ, Ψ) p(X | Y, Ψ) p(Ψ | γ)] + E_q(R)q(Z)[logp(W | Z, R, Φ) p(Φ | β)]
 #         = logq(Ψ) + logq(Φ)
 
-# q(Λ) ∝ Beta((Σ_d Σ_v q_dv + η[0] - 1) + 1, (Σ_d Σ_v η[1] - q_dv) + 1)  q_dv 〜 q(R)
+# q(Λ) ∝ Beta((Σ_d Σ_v q_dv) / (D V_d) + η[0], (Σ_d Σ_v (1 - q_dv)) / (D V_d) + η[1])  q_dv 〜 q(R)
 # サイズ : 2
 # 形状  : ベータ分布
 # 連続確率分布
@@ -993,11 +993,19 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 # 形状  : ディリクレ分布
 # 連続確率分布
 
-# q(θ) ∝ exp(Σ_d Σ_k Σ_l K θ_dk (q_kl / (Σ_l q_kl)) logν_dl) exp(Σ_d Σ_k logθ_dk^{Σ_m q_dmk + α - 1})  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
+# q(θ) ∝ exp(Σ_d Σ_m Σ_k Σ_l K q_dmk θ_dk (q_kl / (Σ_l q_kl)) logν_dl) exp(Σ_d Σ_l -M_d logν_dl) exp(Σ_d Σ_k logθ_dk^{Σ_m q_dmk + M_d (α - 1)})  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
 # ブラックボックス変分推定 対象関数
-# δlogF / δq_dk = Σ_l K (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk) q_kl / (Σ_l q_kl) logν_dl - Σ_l Σ_k\'≠k K q_dk' / ((Σ_k q_dk) ** 2) q_k'l / (Σ_l q_k'l) logν_dl
-            #    + (Σ_m q_dmk + α - q_dk) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk)) - (digamma(q_dk) - digamma(Σ_k q_dk))
-                #  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
+# δlogF / δq_dk = 
+            #  Σ_(k'=k) q_dkについての微分式
+            #  Σ_m Σ_l K q_dmk (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk) q_kl / (Σ_l q_kl) logν_dl
+            # (Σ_m q_dmk + M_d (α - 1) - q_dk + 1) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk))
+            #  - (digamma(q_dk) - digamma(Σ_k q_dk))
+            
+            #  Σ_(k'≠k) q_dkについての微分式
+            #  Σ_(k'≠k)  Σ_m Σ_l K q_dmk ( - q_dk / (Σ_k q_dk)) / (Σ_k q_dk) q_kl / (Σ_l q_kl) logν_dl
+            #  Σ_(k'≠k) (Σ_m q_dmk + M_d (α - 1) - q_dk + 1) ( - polygamma(1, Σ_k q_dk))
+            
+            #  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
 # サイズ : 文書数D × 感情トピック数Κ
 # 形状  : ディリクレ分布
 # 連続確率分布
@@ -1252,11 +1260,19 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             # 形状  : ディリクレ分布
             # 連続確率分布
             
-            # q(θ) ∝ exp(Σ_d Σ_k Σ_l K θ_dk (q_kl / (Σ_l q_kl)) logν_dl) exp(Σ_d Σ_k logθ_dk^{Σ_m q_dmk + α - 1})  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
+            # q(θ) ∝ exp(Σ_d Σ_m Σ_k Σ_l K q_dmk θ_dk (q_kl / (Σ_l q_kl)) logν_dl) exp(Σ_d Σ_l -M_d logν_dl) exp(Σ_d Σ_k logθ_dk^{Σ_m q_dmk + M_d (α - 1)})  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)
             # ブラックボックス変分推定 対象関数
-            # δlogF / δq_dk = Σ_l K (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk) q_kl / (Σ_l q_kl) logν_dl - Σ_l Σ_k\'≠k K q_dk' / ((Σ_k q_dk) ** 2) q_k'l / (Σ_l q_k'l) logν_dl
-                        #    + (Σ_m q_dmk + α - q_dk) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk)) - (digamma(q_dk) - digamma(Σ_k q_dk))
-                            #  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
+            # δlogF / δq_dk = 
+                        #  Σ_(k'=k) q_dkについての微分式
+                        #  Σ_m Σ_l K q_dmk (1 - q_dk / (Σ_k q_dk)) / (Σ_k q_dk) q_kl / (Σ_l q_kl) logν_dl
+                        # (Σ_m q_dmk + M_d (α - 1) - q_dk + 1) (polygamma(1, q_dk) - polygamma(1, Σ_k q_dk))
+                        #  - (digamma(q_dk) - digamma(Σ_k q_dk))
+            
+                        #  Σ_(k'≠k) q_dkについての微分式
+                        #  Σ_(k'≠k)  Σ_m Σ_l K q_dmk ( - q_dk / (Σ_k q_dk)) / (Σ_k q_dk) q_kl / (Σ_l q_kl) logν_dl
+                        #  Σ_(k'≠k) (Σ_m q_dmk + M_d (α - 1) - q_dk + 1) ( - polygamma(1, Σ_k q_dk))
+            
+                        #  q_kl 〜 q(Ψ)  q_dmk 〜 q(Y)  q_dk 〜 q(θ)
             # サイズ : 文書数D × 感情トピック数Κ
             # 形状  : ディリクレ分布
             # 連続確率分布
@@ -1264,51 +1280,82 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             self.Ψ = np.sqrt(2 * self.Ψ)
             self.θ = np.sqrt(2 * self.θ)
             prev_diff   = 0
-            optimizer_ψ = Update_Rafael(0.001, isSHC=True)
-            optimizer_θ = Update_Rafael(0.001, isSHC=True)
-            for idx2 in range(0, 500):
+            optimizer_ψ = Update_Rafael(0.01, isSHC=False)
+            optimizer_θ = Update_Rafael(0.01, isSHC=False)
+            for idx2 in range(0, 1000):
                 q_Ψ     = np.square(self.Ψ) / 2
                 q_θ     = np.square(self.θ) / 2
                 
                 # q(Ψ)の微分計算処理
-                item1_1 = self.topic_num * self.doc_v_num.reshape(self.doc_num, 1, 1) * np.log(self.DLBL).reshape(self.doc_num, 1, self.label_num)
-                item1_2 = (q_θ / np.sum(q_θ, axis=1)).reshape(self.doc_num, self.topic_num, 1) * ((1 - q_Ψ / np.sum(q_Ψ, axis=1)) / np.sum(q_Ψ, axis=1)).reshape(1, self.topic_num, self.label_num)
-                item1_3 = (q_θ / np.sum(q_θ, axis=1)).reshape(self.doc_num, self.topic_num, 1) * (   - q_Ψ / np.sum(q_Ψ, axis=1)  / np.sum(q_Ψ, axis=1)).reshape(1, self.topic_num, self.label_num)
-                item1   = np.sum(item1_1 * item1_2 - item1_1 * item1_3 + np.sum(item1_1 * item1_3, axis=2, keepdims=True), axis=0)
+                # q(Ψ)  : shape(K, L)
+                # item1 : shape(D,   K, L) → shape(K, L)
+                # item2 : shape(M_d, K, L) → shape(K, L)
+                # item3 : shape(M_d, L)    → shape(K, L)
+                item1_1 = self.topic_num * self.doc_v_num.reshape(self.doc_num, 1, 1) * np.log(self.DLBL + self.minor_amount).reshape(self.doc_num, 1, self.label_num)
+                item1_2 = (q_θ / np.sum(q_θ, axis=1, keepdims=True)).reshape(self.doc_num, self.topic_num, 1) * ((1 - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)) / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
+                # item1_3 = (q_θ / np.sum(q_θ, axis=1, keepdims=True)).reshape(self.doc_num, self.topic_num, 1) * (   - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)  / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
+                # item1   = item1_1 * item1_2 - item1_1 * item1_3 + np.sum(item1_1 * item1_3, axis=2, keepdims=True)
+                item1   = item1_1 * item1_2
+                item1   = np.sum(item1, axis=0)
                 
                 item2   = np.zeros(shape=(self.topic_num, self.label_num))
-                item3_1 = np.zeros(shape=(self.topic_num))
+                item3_c = np.zeros(shape=(self.topic_num, self.label_num))
                 for d, m in enumerate(self.doc_v_num):
                     item2_1 = Y_new[d, 0:m, :].reshape(m, self.topic_num, 1)
-                    item2_2 = ((1 - q_Ψ / np.sum(q_Ψ, axis=1)) / np.sum(q_Ψ, axis=1)).reshape(1, self.topic_num, self.label_num)
-                    item2_3 = (   - q_Ψ / np.sum(q_Ψ, axis=1)  / np.sum(q_Ψ, axis=1)).reshape(1, self.topic_num, self.label_num)
-                    item2_4 = (digamma(X_new[d, 0:m, :] + self.minor_amount) - digamma(np.sum(X_new[d, 0:m, :], axis=1) + self.minor_amount)).reshape(m, 1, self.label_num)
-                    item2   += np.sum(item2_1 * item2_2 * item2_4 - item2_1 * item2_3 * item2_4 + np.sum(item2_1 * item2_3 * item2_4, axis=2, keepdims=True), axis=0)
+                    item2_2 = (digamma(X_new[d, 0:m, :] + self.minor_amount) - digamma(np.sum(X_new[d, 0:m, :], axis=1, keepdims=True) + self.minor_amount)).reshape(m, 1, self.label_num)
+                    item2_3 = ((1 - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)) / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
+                    # item2_4 = (   - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)  / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
+                    item2_5 = item2_1 * item2_2
+                    # item2_6 = item2_5 * item2_3 - item2_5 * item2_4 + np.sum(item2_5 * item2_4, axis=2, keepdims=True)
+                    item2_6 = item2_5 * item2_3
+                    item2   += np.sum(item2_6, axis=0)
                     
-                    item3_1 += np.sum(Y_new[d, 0:m, :] * (self.senti_Ψ_γ - 1), axis=0)
+                    item3_1 = Y_new[d, 0:m, :] * (self.senti_Ψ_γ - 1)
+                    item3_c += np.sum(item3_1, axis=0).reshape(self.topic_num, 1)
                 
-                item3_2 = (item3_1 - q_Ψ + 1) * (polygamma(1, q_Ψ + self.minor_amount) - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount))
-                item3_3 = (item3_1 - q_Ψ + 1) * (                                      - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount))
-                item3_4 = -(digamma(q_Ψ + self.minor_amount) - digamma(np.sum(q_Ψ, axis=1) + self.minor_amount))
-                item3   = item3_2 + item3_4 - item3_3 + np.sum(item3_3, axis=1, keepdims=True)
+                item3_2 = -(digamma(q_Ψ + self.minor_amount) - digamma(np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount))
+                item3_3 = (item3_c - q_Ψ + 1) * (polygamma(1, q_Ψ + self.minor_amount) - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount))
+                # item3_4 = (item3_c - q_Ψ + 1) * (                                      - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount))
+                # item3   = item3_2 + item3_3 - item3_4 + np.sum(item3_4, axis=1, keepdims=True)
+                item3   = item3_2 + item3_3
                 ψ_diff  = item1 + item2 + item3
                 
-                # q(θ)の微分計算処理
-                for l in range(0, self.label_num):
-                    ratio   = q_Ψ[:, l] / np.sum(q_Ψ, axis=1)
-                    diff_ψ += self.topic_num * ratio.reshape([1, self.topic_num]) * np.log(self.DLBL[:, l].reshape([self.doc_num, 1]) + self.minor_amount)
-                                
-                diff_y = (np.sum(Y_new, axis=1) + self.topic_θ_α - q_θ) * (polygamma(1, q_θ + self.minor_amount) - polygamma(1, np.sum(q_θ, axis=1, keepdims=True) + self.minor_amount)) - (digamma(q_θ + self.minor_amount) - digamma(np.sum(q_θ, axis=1, keepdims=True) + self.minor_amount))
                 
-                ψ_diff = ψ_diff * self.Ψ
-                Δdiff  = optimizer_ψ.update(ψ_diff)
+                # q(θ)の微分計算処理
+                # q(θ)  : shape(D, K)
+                # item1 : shape(D, K)
+                # item2 : shape(D, K)
+                item1 = np.zeros(shape=(self.doc_num, self.topic_num))
+                item2 = np.zeros(shape=(self.doc_num, self.topic_num))
+                for d, m in enumerate(self.doc_v_num):
+                    items_1 = Y_new[d, 0:m, :].reshape(m, self.topic_num, 1)
+                    
+                    item1_1 = self.topic_num * (q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
+                    item1_2 = np.log(self.DLBL[d, :] + self.minor_amount).reshape(1, 1, self.label_num)
+                    item1_3 = ((1 - q_θ[d, :] / np.sum(q_θ[d, :])) / np.sum(q_θ[d, :])).reshape(1, self.topic_num, 1)
+                    # item1_4 = (   - q_θ[d, :] / np.sum(q_θ[d, :])  / np.sum(q_θ[d, :])).reshape(1, self.topic_num, 1)
+                    item1_5 = items_1 * item1_1 * item1_2
+                    # item1_6 = item1_5 * item1_3 - item1_5 * item1_4 + np.sum(item1_5 * item1_4, axis=2, keepdims=True)
+                    item1_6 = item1_5 * item1_3
+                    item1[d, :] = np.sum(item1_6, axis=(0, 2))
+                    
+                    item2_1 = -(digamma(q_θ[d, :] + self.minor_amount) - digamma(np.sum(q_θ[d, :]) + self.minor_amount))
+                    item2_2 = np.sum(items_1, axis=(0, 2)) - q_θ[d, :] + m * (self.topic_θ_α - 1) + 1
+                    item2_3 = polygamma(1, q_θ[d, :]) - polygamma(1, np.sum(q_θ[d, :]))
+                    # item2_4 =                         - polygamma(1, np.sum(q_θ[d, :]))
+                    # item2_5 = item2_1 + item2_2 * item2_3 - item2_2 * item2_4 + np.sum(item2_2 * item2_4)
+                    item2_5 = item2_1 + item2_2 * item2_3
+                    item2[d, :] = item2_5
+                
+                θ_diff = item1 + item2
+                
+                l2_λ   = 0.1
+                ψ_diff = ψ_diff * self.Ψ - l2_λ * self.Ψ
+                Δdiff  = ψ_diff / self.doc_num
                 self.Ψ = self.Ψ + Δdiff
                 
-                θ_diff = diff_ψ
-                θ_diff = θ_diff * (1 - q_θ / np.sum(q_θ, axis=1, keepdims=True)) / np.sum(q_θ, axis=1, keepdims=True) - np.sum(θ_diff * q_θ / (np.sum(q_θ, axis=1, keepdims=True) ** 2), axis=1, keepdims=True) + θ_diff * q_θ / (np.sum(q_θ, axis=1, keepdims=True) ** 2)
-                θ_diff = θ_diff + diff_y
-                θ_diff = θ_diff * self.θ
-                Δdiff  = optimizer_θ.update(θ_diff)
+                θ_diff = θ_diff * self.θ - l2_λ * self.θ
+                Δdiff  = θ_diff / self.doc_num
                 self.θ = self.θ + Δdiff
                 
                 ψ_sum_diff = np.sum(np.abs(ψ_diff))
@@ -1326,6 +1373,8 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                     print(' '*len(line) + f' q(θ)： 総微分量：{θ_sum_diff}')
                     print(' '*len(line) + f' q(θ)： 要素あたりの微分量：{θ_per_diff}')
                     print(' '*len(line) + f' 微分量の変化：{np.abs(per_diff - prev_diff)}')
+                elif idx2 % 10 == 0:
+                    print(idx2)
                 
                 if np.abs(per_diff - prev_diff) < 0.1:
                     break
