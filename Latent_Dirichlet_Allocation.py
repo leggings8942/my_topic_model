@@ -1279,9 +1279,9 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             
             self.Ψ = np.sqrt(2 * self.Ψ)
             self.θ = np.sqrt(2 * self.θ)
-            optimizer_ψ = Update_Rafael(0.01, isSHC=True)
-            optimizer_θ = Update_Rafael(0.01, isSHC=True)
-            for idx2 in range(0, 1000):
+            optimizer_ψ = Update_Rafael(0.001, isSHC=True)
+            optimizer_θ = Update_Rafael(0.001, isSHC=True)
+            for idx2 in range(0, 2000):
                 q_Ψ     = np.square(self.Ψ) / 2
                 q_θ     = np.square(self.θ) / 2
                 
