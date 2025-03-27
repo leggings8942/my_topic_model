@@ -1022,7 +1022,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 
 
 class Harmonized_Sentiment_Topic_Model_In_VB:
-    def __init__(self, train_data:pd.DataFrame, train_labels:pd.DataFrame, stop_word:frozenset[str], label_max_value:float=4, tol:float=1e-6, minor_amount:float=1e-32, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
+    def __init__(self, train_data:pd.DataFrame, train_labels:pd.DataFrame, stop_word:frozenset[str], label_max_value:float=4, tol:float=1e-4, minor_amount:float=1e-32, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
         
@@ -1155,7 +1155,6 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
     
     def fit(self) -> bool:
         # 学習開始
-        prev_error = 0
         for idx in range(0, self.max_iterate):
             # 初期化
             Λ_new  = np.zeros_like(self.Λ)
@@ -1285,58 +1284,51 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                 q_Ψ     = np.square(self.Ψ) / 2
                 q_θ     = np.square(self.θ) / 2
                 
-                # q(Ψ)の微分計算処理
+                # q(Ψ), q(θ) の微分計算処理
                 # q(Ψ)  : shape(K, L)
-                # item1 : shape(D,   K, L) → shape(K, L)
-                # item2 : shape(M_d, K, L) → shape(K, L)
-                # item3 : shape(M_d, L)    → shape(K, L)
-                item1_1 = np.log(self.DLBL + self.minor_amount).reshape(self.doc_num, 1, self.label_num)
-                item1_2 = (q_θ / np.sum(q_θ, axis=1, keepdims=True)).reshape(self.doc_num, self.topic_num, 1)
-                item1_3 = item1_1 * item1_2
-                item1_4 = ((1 - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)) / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
-                item1_5 = (   - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)  / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
-                item1_6 = item1_3 * item1_4 - item1_3 * item1_5 + np.sum(item1_3 * item1_5, axis=2, keepdims=True)
-                item1   = np.sum(item1_6, axis=0) / self.doc_num
-                
-                item2   = np.zeros(shape=(self.topic_num, self.label_num))
-                for d, m in enumerate(self.doc_v_num):
-                    item2_1 = Y_new[d, 0:m, :].reshape(m, self.topic_num, 1)
-                    item2_2 = (digamma(X_new[d, 0:m, :] + self.minor_amount) - digamma(np.sum(X_new[d, 0:m, :], axis=1, keepdims=True) + self.minor_amount)).reshape(m, 1, self.label_num)
-                    item2_3 = item2_1 * item2_2
-                    item2_4 = item2_3 * item1_4 - item2_3 * item1_5 + np.sum(item2_3 * item1_5, axis=2, keepdims=True)
-                    item2   += np.sum(item2_4, axis=0) / (self.doc_num * m)
-                
-                item3_1 = self.senti_Ψ_γ - q_Ψ
-                item3_2 = polygamma(1, q_Ψ + self.minor_amount) - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount)
-                item3_3 =                                       - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount)
-                item3   = item3_1 * item3_2 - item3_1 * item3_3 + np.sum(item3_1 * item3_3, axis=1, keepdims=True)
-                ψ_diff  = item1 + item2 + item3
-                
-                
-                # q(θ)の微分計算処理
                 # q(θ)  : shape(D, K)
-                # item1 : shape(D, K)
-                # item2 : shape(D, K)
-                item1 = np.zeros(shape=(self.doc_num, self.topic_num))
-                item2 = np.zeros(shape=(self.doc_num, self.topic_num))
+                itemψ_1_1 = np.log(self.DLBL + self.minor_amount).reshape(self.doc_num, 1, self.label_num)
+                itemψ_1_2 = (q_θ / np.sum(q_θ, axis=1, keepdims=True)).reshape(self.doc_num, self.topic_num, 1)
+                itemψ_1_3 = itemψ_1_1 * itemψ_1_2
+                itemψ_1_4 = ((1 - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)) / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
+                itemψ_1_5 = (   - q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)  / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
+                itemψ_1_6 = itemψ_1_3 * itemψ_1_4 - itemψ_1_3 * itemψ_1_5 + np.sum(itemψ_1_3 * itemψ_1_5, axis=2, keepdims=True)
+                itemψ_1   = np.sum(itemψ_1_6, axis=0) / self.doc_num
+                
+                itemψ_2_1 = self.senti_Ψ_γ - q_Ψ
+                itemψ_2_2 = polygamma(1, q_Ψ + self.minor_amount) - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount)
+                itemψ_2_3 =                                       - polygamma(1, np.sum(q_Ψ, axis=1, keepdims=True) + self.minor_amount)
+                itemψ_2   = itemψ_2_1 * itemψ_2_2 - itemψ_2_1 * itemψ_2_3 + np.sum(itemψ_2_1 * itemψ_2_3, axis=1, keepdims=True)
+                
+                items_θ = np.zeros(shape=(self.doc_num, self.topic_num))
+                items_ψ = np.zeros(shape=(self.doc_num, self.topic_num, self.label_num))
                 for d, m in enumerate(self.doc_v_num):
                     items_1 = Y_new[d, 0:m, :].reshape(m, self.topic_num, 1)
+                    items_θ[d, :] = np.sum(items_1, axis=(0, 2)) / m
                     
-                    item1_1 = (q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
-                    item1_2 = np.log(self.DLBL[d, :] + self.minor_amount).reshape(1, 1, self.label_num)
-                    item1_3 = items_1 * item1_1 * item1_2
-                    item1_4 = ((1 - q_θ[d, :] / np.sum(q_θ[d, :])) / np.sum(q_θ[d, :], keepdims=True)).reshape(1, self.topic_num, 1)
-                    item1_5 = (   - q_θ[d, :] / np.sum(q_θ[d, :])  / np.sum(q_θ[d, :], keepdims=True)).reshape(1, self.topic_num, 1)
-                    item1_6 = item1_3 * item1_4 - item1_3 * item1_5 + np.sum(item1_3 * item1_5, axis=1, keepdims=True)
-                    item1[d, :] = np.sum(item1_6, axis=(0, 2)) / m
+                    items_ψ_1 = (digamma(X_new[d, 0:m, :] + self.minor_amount) - digamma(np.sum(X_new[d, 0:m, :], axis=1, keepdims=True) + self.minor_amount)).reshape(m, 1, self.label_num)
+                    items_ψ_2 = items_1 * items_ψ_1
+                    items_ψ[d, :, :] = np.sum(items_ψ_2, axis=0) / m
                     
-                    item2_1 = np.sum(items_1, axis=(0, 2)) / m + self.topic_θ_α - q_θ[d, :]
-                    item2_2 = polygamma(1, q_θ[d, :]) - polygamma(1, np.sum(q_θ[d, :], keepdims=True))
-                    item2_3 =                         - polygamma(1, np.sum(q_θ[d, :], keepdims=True))
-                    item2_4 = item2_1 * item2_2 - item2_1 * item2_3 + np.sum(item2_1 * item2_3, keepdims=True)
-                    item2[d, :] = item2_4
+                itemψ_3_1 = items_ψ * itemψ_1_4 - items_ψ * itemψ_1_5 + np.sum(items_ψ * itemψ_1_5, axis=2, keepdims=True)
+                itemψ_3   = np.sum(itemψ_3_1, axis=0) / self.doc_num
+                    
+                itemθ_1_1 = (q_Ψ / np.sum(q_Ψ, axis=1, keepdims=True)).reshape(1, self.topic_num, self.label_num)
+                itemθ_1_2 = np.log(self.DLBL + self.minor_amount).reshape(self.doc_num, 1, self.label_num)
+                itemθ_1_3 = items_θ.reshape(self.doc_num, self.topic_num, 1) * itemθ_1_1 * itemθ_1_2
+                itemθ_1_4 = ((1 - q_θ / np.sum(q_θ, axis=1, keepdims=True)) / np.sum(q_θ, axis=1, keepdims=True)).reshape(self.doc_num, self.topic_num, 1)
+                itemθ_1_5 = (   - q_θ / np.sum(q_θ, axis=1, keepdims=True)  / np.sum(q_θ, axis=1, keepdims=True)).reshape(self.doc_num, self.topic_num, 1)
+                itemθ_1_6 = itemθ_1_3 * itemθ_1_4 - itemθ_1_3 * itemθ_1_5 + np.sum(itemθ_1_3 * itemθ_1_5, axis=2, keepdims=True)
+                itemθ_1   = np.sum(itemθ_1_6, axis=2)
+                    
+                itemθ_2_1 = items_θ + self.topic_θ_α - q_θ
+                itemθ_2_2 = polygamma(1, q_θ) - polygamma(1, np.sum(q_θ, axis=1, keepdims=True))
+                itemθ_2_3 =                   - polygamma(1, np.sum(q_θ, axis=1, keepdims=True))
+                itemθ_2_4 = itemθ_2_1 * itemθ_2_2 - itemθ_2_1 * itemθ_2_3 + np.sum(itemθ_2_1 * itemθ_2_3, axis=1, keepdims=True)
+                itemθ_2   = itemθ_2_4
                 
-                θ_diff = item1 + item2
+                ψ_diff = itemψ_1 + itemψ_2 + itemψ_3
+                θ_diff = itemθ_1 + itemθ_2
                 
                 ψ_diff = ψ_diff * self.Ψ
                 Δdiff  = optimizer_ψ.update(ψ_diff)
@@ -1365,8 +1357,8 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                     break
             
             # 変数変換
-            self.Ψ = np.maximum(np.square(self.Ψ) / 2, self.minor_amount)
-            self.θ = np.maximum(np.square(self.θ) / 2, self.minor_amount)
+            self.Ψ = np.square(self.Ψ) / 2
+            self.θ = np.square(self.θ) / 2
             
             # デバッグ出力
             error_Λ = np.sum(np.abs(self.Λ - Λ_new))
@@ -1401,10 +1393,8 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
             self.R  = R_new
             
             # 終了条件
-            if np.abs(error - prev_error) < self.tol:
+            if np.abs(error) < self.tol:
                 break
-            else:
-                prev_error = error
 
         return True
     
