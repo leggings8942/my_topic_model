@@ -4,6 +4,8 @@ csv_data
 json_data
 parquet_share*
 parquet_data*
+wrime_data*
+parquet_share_data*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

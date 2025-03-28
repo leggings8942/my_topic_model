@@ -1022,7 +1022,7 @@ class LDA_In_CGS: # Collapsed Gibbs Sampling
 
 
 class Harmonized_Sentiment_Topic_Model_In_VB:
-    def __init__(self, train_data:pd.DataFrame, train_labels:pd.DataFrame, stop_word:frozenset[str], label_max_value:float=4, tol:float=1e-4, minor_amount:float=1e-32, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
+    def __init__(self, train_data:pd.DataFrame, train_labels:pd.DataFrame, stop_word:frozenset[str], label_max_value:float=4, tol:float=1e-3, minor_amount:float=1e-32, topic_num:int=10, max_iterate:int=300000, random_state=None) -> None:
         if type(train_data) is list:
             train_data = pd.DataFrame(data=train_data, columns=['text'])
         
@@ -1043,6 +1043,7 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         # ラベルデータに対する前処理
         train_labels[train_labels < 0] = 0
         train_labels[train_labels > label_max_value] = label_max_value
+        train_labels = train_labels / label_max_value
         
         if len(train_data) != len(train_labels):
             print(f"len(train_data)   = {len(train_data)}")
@@ -1068,6 +1069,7 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         tokenizer_obj = dictionary.Dictionary(dict_type='full').create()
         tokenize_mode = tokenizer.Tokenizer.SplitMode.C
         
+        WORD_LIMIT_LOWER = 3
         vocab_count = 0
         self.W2I    = {}
         self.DI2W   = [{} for _ in range(0, self.doc_num)]
@@ -1102,8 +1104,8 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                     self.DCNT[idx][word] = 1
                     doc_w_count += 1
             
-            # 空の文書を登録
-            if doc_w_count == 0:
+            # 単語数の少ない文書を登録
+            if doc_w_count < WORD_LIMIT_LOWER:
                 DEL_IDX.append(idx)
             else:
                 tmp = [train_data.at[idx, lbl] for lbl in self.label]
@@ -1112,12 +1114,12 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         # numpy配列への変換
         self.DLBL = np.array(self.DLBL)
         
-        # 空の文書を削除
+        # 単語数の少ない文書を登録
         self.train_data = train_data.drop(train_data.index[DEL_IDX]).reset_index(drop=True)
         self.doc_num    = len(self.train_data)
-        self.DI2W       = [elem for elem in self.DI2W if elem != {}]
-        self.DW2I       = [elem for elem in self.DW2I if elem != {}]
-        self.DCNT       = [elem for elem in self.DCNT if elem != {}]
+        self.DI2W       = [self.DI2W[idx] for idx in range(0, len(self.DI2W)) if idx not in DEL_IDX]
+        self.DW2I       = [self.DW2I[idx] for idx in range(0, len(self.DW2I)) if idx not in DEL_IDX]
+        self.DCNT       = [self.DCNT[idx] for idx in range(0, len(self.DCNT)) if idx not in DEL_IDX]
         
         # 解析結果の保存
         self.vocab_num  = vocab_count
@@ -1378,7 +1380,6 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                 print(' '*len(line) + f' 感情ラベル分布X：', error_X)
                 print(' '*len(line) + f' 感情トピック分布Z：', error_Z)
                 print(' '*len(line) + f' 関係性トピック分布R：', error_R)
-                print(' '*len(line) + f' 総誤差量Eの変化：', np.abs(error - prev_error))
                 
                 print()
             
@@ -1421,3 +1422,11 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         pd_R  = pd.DataFrame(rlshp_R,                   index=doc_idx,     columns=word_idx).T
         
         return pd_θ, pd_Ψ, pd_Φ1, pd_Φ0, pd_R
+    
+    def get_source(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        original_data = self.train_data
+        
+        original_word = [[self.DI2W[idx][w_idx] if w_idx < self.doc_w_num[idx] else "" for w_idx in range(0, max(self.doc_w_num))] for idx in range(0, self.doc_num)]
+        original_word = pd.DataFrame(original_word, index=[f"文書{i + 1}" for i in range(0, self.doc_num)], columns=[f"単語{i + 1}" for i in range(0, max(self.doc_w_num))])
+        
+        return original_data, original_word
