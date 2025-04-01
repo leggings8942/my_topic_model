@@ -1126,7 +1126,7 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         self.doc_v_num  = np.array([len(self.DCNT[idx])                   for idx in range(0, self.doc_num)], dtype=int)
         self.doc_w_num  = np.array([np.sum(list(self.DCNT[idx].values())) for idx in range(0, self.doc_num)], dtype=int)
         self.relat_R_η  = 1
-        self.topic_θ_α  = 1 / (self.vocab_num * 100)
+        self.topic_θ_α  = 1
         self.word_Φ_β   = 1
         self.senti_Ψ_γ  = 1 / (self.vocab_num * 100)
         
@@ -1183,11 +1183,13 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
                     # q(R=1) ∝ exp(Σ_n:(v=W_dn) Σ_l (q_dnl / (D N_d)) (digamma(q_lv) - digamma(Σ_v q_lv)))   q_dnl 〜 q(Z)  q_lv 〜 q(Φ1)
                     # q(R=0) ∝ exp(Σ_n:(v=W_dn) 1  / (D N_d)          (digamma(q_0v) - digamma(Σ_v q_0v)) (digamma(q_b) - digamma(q_a + q_b)))   q_a, q_b 〜 q(Λ)  q_dnl 〜 q(Z)  q_0v 〜 q(Φ0)
                     q_1Φ  = digamma(self.Φ1[:, self.W2I[word]] + self.minor_amount) - digamma(np.sum(self.Φ1, axis=1) + self.minor_amount)
+                    q_1Λ  = digamma(Λ_new[0]) - digamma(Λ_new[0] + Λ_new[1])
                     q_1Z  = np.sum(self.Z[idx_doc, [n for n in self.DW2I[idx_doc][word]], :], axis=0) / len(self.DW2I[idx_doc][word])
-                    q_1R  = np.sum(q_1Z * q_1Φ)
+                    q_1R  = np.sum(q_1Z * q_1Φ) + q_1Λ
                     
                     q_0Φ  = digamma(self.Φ0[0, self.W2I[word]] + self.minor_amount) - digamma(np.sum(self.Φ0, axis=1) + self.minor_amount)
-                    q_0R  = q_0Φ
+                    q_0Λ  = digamma(Λ_new[1]) - digamma(Λ_new[0] + Λ_new[1])
+                    q_0R  = q_0Φ + q_0Λ
                     
                     # R_new[idx_doc, self.W2I[word]] = np.exp(q_1R) / (np.exp(q_1R) + np.exp(q_0R))
                     
@@ -1422,13 +1424,14 @@ class Harmonized_Sentiment_Topic_Model_In_VB:
         
         
         # # トピック数とは違い、単語数は事前に把握することができないため四捨五入を行わない
+        pd_Λ  = pd.DataFrame(data=self.Λ.T)
         pd_θ  = pd.DataFrame(data=np.round(topic_θ, 4), index=doc_idx,     columns=topic_idx)
         pd_Ψ  = pd.DataFrame(data=np.round(senti_Ψ, 4), index=topic_idx,   columns=label_idx).T
-        pd_Φ1 = pd.DataFrame(word_Φ1,                   index=label_idx,   columns=word_idx).T
-        pd_Φ0 = pd.DataFrame(word_Φ0,                   index=[f"一般単語"], columns=word_idx).T
-        pd_R  = pd.DataFrame(rlshp_R,                   index=doc_idx,     columns=word_idx).T
+        pd_Φ1 = pd.DataFrame(data=word_Φ1,              index=label_idx,   columns=word_idx).T
+        pd_Φ0 = pd.DataFrame(data=word_Φ0,              index=[f"一般単語"], columns=word_idx).T
+        pd_R  = pd.DataFrame(data=rlshp_R,              index=doc_idx,     columns=word_idx).T
         
-        return pd_θ, pd_Ψ, pd_Φ1, pd_Φ0, pd_R
+        return pd_Λ, pd_θ, pd_Ψ, pd_Φ1, pd_Φ0, pd_R
     
     def get_source(self) -> tuple:
         original_data      = self.train_data                                      # 学習元データのデータフレーム
